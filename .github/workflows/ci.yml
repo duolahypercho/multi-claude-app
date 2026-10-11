@@ -1,0 +1,28 @@
+name: macOS build and profile tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell scripts
+        run: sh -n install.sh scripts/build.sh 'Start Claude Profiles.command'
+      - name: Build native executable
+        run: sh scripts/build.sh
+      - name: Test profile management without installing integrations
+        run: python3 tests/test_cli.py
+      - name: Compile the other Mac architecture
+        run: |
+          case "$(uname -m)" in
+            arm64) ARCH=x86_64 sh scripts/build.sh ;;
+            x86_64) ARCH=arm64 sh scripts/build.sh ;;
+          esac
