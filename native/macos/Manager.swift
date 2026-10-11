@@ -277,16 +277,46 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     @objc func removeAccount(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
-        if runningInstances(c)[id] != nil {
-            status.stringValue = "Quit \(p.name) before removing it."
-            showError("Quit Claude for \(p.name) with Command-Q, then choose Remove Profile again. Its app and account data have not been changed.")
+        guard !busy, let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
+        if let app = runningInstances(c)[id] {
+            let alert = NSAlert(); alert.messageText = "Claude is still open for \(p.name)"
+            alert.informativeText = "Force quitting will close only this Claude account app. Unsaved work in its window may be lost. The account data on disk will be kept, and you can restore the profile later."
+            alert.addButton(withTitle: "Force Quit & Remove"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            forceQuitAndRemove(p, app)
             return
         }
         let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "This removes its Claude app from the active account list. All account data is kept, and you can restore the profile later."
         alert.addButton(withTitle: "Remove Profile"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        execute(["remove", id], message: "Removing the Claude app and keeping its data…") {
+        removeClosedProfile(p)
+    }
+    func forceQuitAndRemove(_ p: Profile, _ app: NSRunningApplication) {
+        guard !busy else { return }
+        busy = true; addButton.isEnabled = false; status.stringValue = "Closing Claude for \(p.name)…"; operationIndicator.startAnimation(nil)
+        _ = app.forceTerminate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let deadline = Date().addingTimeInterval(8)
+            var hasExited = false
+            repeat {
+                hasExited = runningNativeApp(p.launcherPath) == nil
+                if hasExited { break }
+                Thread.sleep(forTimeInterval: 0.2)
+            } while Date() < deadline
+            let exited = hasExited
+            DispatchQueue.main.async {
+                self.busy = false; self.addButton.isEnabled = true; self.operationIndicator.stopAnimation(nil)
+                guard exited else {
+                    self.reload(force: true); self.status.stringValue = "Claude for \(p.name) is still open; the profile was not removed."
+                    showError("Claude could not be closed, so Multi Claude left the profile and its account data unchanged. Quit it manually and try again.")
+                    return
+                }
+                self.removeClosedProfile(p)
+            }
+        }
+    }
+    func removeClosedProfile(_ p: Profile) {
+        execute(["remove", p.id], message: "Removing the Claude app and keeping its data…") {
             self.reload(force: true)
             self.status.stringValue = "Removed \(p.name). Its account data is saved and can be restored."
         }
