@@ -44,27 +44,127 @@ func managerLabel(_ text: String, size: CGFloat, weight: NSFont.Weight = .regula
     let label = NSTextField(labelWithString: text); label.font = .systemFont(ofSize: size, weight: weight); label.textColor = color
     label.lineBreakMode = .byTruncatingMiddle; label.translatesAutoresizingMaskIntoConstraints = false; return label
 }
+private func managerDynamicColor(light: NSColor, dark: NSColor) -> NSColor {
+    NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+    }
+}
+private let managerCanvasColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.965, green: 0.953, blue: 0.929, alpha: 1),
+    dark: NSColor(srgbRed: 0.105, green: 0.100, blue: 0.094, alpha: 1))
+private let managerCardColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.995, green: 0.989, blue: 0.975, alpha: 1),
+    dark: NSColor(srgbRed: 0.150, green: 0.143, blue: 0.134, alpha: 1))
+private let managerCardBorderColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.890, green: 0.860, blue: 0.817, alpha: 1),
+    dark: NSColor(srgbRed: 0.285, green: 0.265, blue: 0.242, alpha: 1))
+private let managerChipColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.936, green: 0.910, blue: 0.866, alpha: 1),
+    dark: NSColor(srgbRed: 0.210, green: 0.195, blue: 0.176, alpha: 1))
+private let managerTerracotta = NSColor(srgbRed: 0.80, green: 0.39, blue: 0.27, alpha: 1)
 func managerButton(_ title: String, target: AnyObject, action: Selector) -> NSButton {
     let button = NSButton(title: title, target: target, action: action); button.bezelStyle = .rounded
     button.translatesAutoresizingMaskIntoConstraints = false; return button
 }
+private func managerPrimaryButton(_ button: NSButton) {
+    button.bezelStyle = .rounded; button.isBordered = false; button.wantsLayer = true
+    button.layer?.backgroundColor = managerTerracotta.cgColor; button.layer?.cornerRadius = 10
+    button.contentTintColor = .white; button.font = .systemFont(ofSize: 13, weight: .semibold)
+}
+private final class ManagerStatusPill: NSView {
+    init(running: Bool) {
+        super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true; layer?.backgroundColor = (running
+            ? NSColor.systemGreen.withAlphaComponent(0.12) : managerChipColor).cgColor
+        layer?.cornerRadius = 8
+        let dot = NSView(); dot.translatesAutoresizingMaskIntoConstraints = false; dot.wantsLayer = true
+        dot.layer?.backgroundColor = (running ? NSColor.systemGreen : NSColor.secondaryLabelColor).cgColor
+        dot.layer?.cornerRadius = 3
+        let label = managerLabel(running ? "OPEN" : "READY", size: 9, weight: .bold,
+                                 color: running ? NSColor.systemGreen : .secondaryLabelColor)
+        let row = NSStackView(views: [dot, label]); row.orientation = .horizontal; row.alignment = .centerY
+        row.spacing = 5; row.translatesAutoresizingMaskIntoConstraints = false; addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 19),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7), row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor), dot.widthAnchor.constraint(equalToConstant: 6), dot.heightAnchor.constraint(equalToConstant: 6)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:)") }
+}
 final class AccountDocumentView: NSView { override var isFlipped: Bool { true } }
+final class UsageBarView: NSView {
+    var percent: Double? { didSet { needsDisplay = true } }
+    var tint: NSColor = managerTerracotta { didSet { needsDisplay = true } }
+    override func draw(_ dirtyRect: NSRect) {
+        let track = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        NSColor.quaternaryLabelColor.withAlphaComponent(0.24).setFill(); track.fill()
+        guard let percent else { return }
+        let width = bounds.width * min(1, max(0, percent / 100))
+        guard width > 0 else { return }
+        let radius = min(bounds.height / 2, width / 2)
+        let fill = NSBezierPath(roundedRect: NSRect(x: bounds.minX, y: bounds.minY, width: width, height: bounds.height), xRadius: radius, yRadius: radius)
+        (percent >= 100 ? NSColor.systemRed : tint).setFill(); fill.fill()
+    }
+}
+final class UsageMeterRow: NSView {
+    init(title: String, meter: UsageMeter?, message: String, tint: NSColor) {
+        super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
+        let titleLabel = managerLabel(title, size: 11, weight: .medium)
+        let detailText = meter.flatMap { usageResetDescription($0.resetsAt) } ?? message
+        let detailLabel = managerLabel(detailText, size: 9, color: .secondaryLabelColor)
+        let percentage = NSTextField(labelWithString: meter.map { String(format: "%.0f%% used", $0.percent) } ?? "—")
+        percentage.font = .systemFont(ofSize: 11, weight: .medium); percentage.alignment = .right
+        percentage.textColor = (meter?.percent ?? 0) >= 100 ? .systemRed : (meter == nil ? .secondaryLabelColor : .labelColor)
+        percentage.translatesAutoresizingMaskIntoConstraints = false
+        let bar = UsageBarView(); bar.percent = meter?.percent; bar.tint = tint; bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.setAccessibilityLabel(title + ", " + (meter.map { String(format: "%.0f percent used", $0.percent) } ?? message))
+        addSubview(titleLabel); addSubview(detailLabel); addSubview(bar); addSubview(percentage)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 34),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor), titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            titleLabel.widthAnchor.constraint(equalToConstant: 176),
+            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor), detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
+            detailLabel.widthAnchor.constraint(equalTo: titleLabel.widthAnchor),
+            percentage.trailingAnchor.constraint(equalTo: trailingAnchor), percentage.centerYAnchor.constraint(equalTo: centerYAnchor), percentage.widthAnchor.constraint(equalToConstant: 78),
+            bar.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 14), bar.trailingAnchor.constraint(equalTo: percentage.leadingAnchor, constant: -14),
+            bar.centerYAnchor.constraint(equalTo: centerYAnchor), bar.heightAnchor.constraint(equalToConstant: 8)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:)" ) }
+}
+func usageResetDescription(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let iso = ISO8601DateFormatter()
+    let date = iso.date(from: value) ?? {
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso.date(from: value)
+    }()
+    guard let date else { return nil }
+    let formatter = DateFormatter(); formatter.timeZone = .current; formatter.dateFormat = "EEE h:mm a"
+    return "Resets \(formatter.string(from: date))"
+}
+
 final class AccountCard: NSView {
     let profile: Profile
-    init(_ p: Profile, running: Bool, needsReopen: Bool, target: ManagerDelegate) {
+    init(_ p: Profile, running: Bool, needsReopen: Bool, usage: ProfileUsageSnapshot?, target: ManagerDelegate) {
         profile = p; super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true; layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor; layer?.cornerRadius = 14
-        layer?.borderWidth = 1; layer?.borderColor = (palette[p.iconColor] ?? .separatorColor).withAlphaComponent(0.35).cgColor
+        wantsLayer = true; layer?.backgroundColor = managerCardColor.cgColor; layer?.cornerRadius = 15
+        layer?.borderWidth = 1; layer?.borderColor = managerCardBorderColor.cgColor
+        let header = NSView(); header.translatesAutoresizingMaskIntoConstraints = false; addSubview(header)
         let accent = NSView(); accent.wantsLayer = true; accent.layer?.backgroundColor = (palette[p.iconColor] ?? .controlAccentColor).cgColor
-        accent.layer?.cornerRadius = 3; accent.translatesAutoresizingMaskIntoConstraints = false; addSubview(accent)
-        let image = NSImageView(); image.image = profileImage(p, size: 48); image.translatesAutoresizingMaskIntoConstraints = false; addSubview(image)
-        let title = managerLabel(p.name, size: 18, weight: .semibold); addSubview(title)
+        accent.layer?.cornerRadius = 2; accent.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(accent)
+        let image = NSImageView(); image.image = profileImage(p, size: 40); image.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(image)
+        let title = managerLabel(p.name, size: 15, weight: .semibold); header.addSubview(title)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let detail = managerLabel(needsReopen ? "Quit and reopen this account to apply its Dock tag" : running ? "Running · click Open to switch" : "Closed · opens a separate Claude profile", size: 12, color: .secondaryLabelColor); addSubview(detail)
-        let state = managerLabel(running ? "● Running" : "○ Closed", size: 11, weight: .medium, color: running ? .systemGreen : .secondaryLabelColor); addSubview(state)
+        let statePill = ManagerStatusPill(running: running); header.addSubview(statePill)
+        let detail = managerLabel(needsReopen ? "Reopen to apply the account Dock tag" : "Private sign-in · separate Claude profile", size: 11, color: .secondaryLabelColor); header.addSubview(detail)
         let openButton = managerButton("Open Claude", target: target, action: #selector(ManagerDelegate.openAccount(_:)))
-        openButton.identifier = NSUserInterfaceItemIdentifier(p.id); addSubview(openButton)
+        openButton.identifier = NSUserInterfaceItemIdentifier(p.id); header.addSubview(openButton)
         openButton.setAccessibilityLabel("Open Claude for " + p.name)
+        let usageButton = managerButton("Usage page", target: target, action: #selector(ManagerDelegate.openUsage(_:)))
+        usageButton.identifier = NSUserInterfaceItemIdentifier(p.id); header.addSubview(usageButton)
+        usageButton.setAccessibilityLabel("Open the official Claude Usage page for " + p.name)
         let more = NSPopUpButton(frame: .zero, pullsDown: true); more.translatesAutoresizingMaskIntoConstraints = false; more.bezelStyle = .rounded
         let menu = NSMenu(); menu.addItem(withTitle: "Manage", action: nil, keyEquivalent: "")
         let rename = menu.addItem(withTitle: "Rename / Set Email Label…", action: #selector(ManagerDelegate.renameAccount(_:)), keyEquivalent: ""); rename.target = target; rename.representedObject = p.id
@@ -77,15 +177,31 @@ final class AccountCard: NSView {
         let colorItem = menu.addItem(withTitle: "Tag Color", action: nil, keyEquivalent: ""); colorItem.submenu = colors
         menu.addItem(.separator())
         let remove = menu.addItem(withTitle: "Remove Profile…", action: #selector(ManagerDelegate.removeAccount(_:)), keyEquivalent: ""); remove.target = target; remove.representedObject = p.id
-        more.menu = menu; more.setAccessibilityLabel("Manage " + p.name); addSubview(more)
+        more.menu = menu; more.setAccessibilityLabel("Manage " + p.name); header.addSubview(more)
+        var rows: [(String, UsageMeter?)] = [("Current session", usage?.fiveHour), ("This week", usage?.weekly)]
+        rows += (usage?.scopedWeekly ?? []).map { ($0.title, $0) }
+        let rowStack = NSStackView(); rowStack.orientation = .vertical; rowStack.alignment = .leading; rowStack.spacing = 3
+        rowStack.translatesAutoresizingMaskIntoConstraints = false; addSubview(rowStack)
+        let placeholder = usage?.message ?? "Usage is loading…"
+        for (name, meter) in rows {
+            let row = UsageMeterRow(title: name, meter: meter, message: meter == nil ? placeholder : "", tint: palette[p.iconColor] ?? managerTerracotta)
+            rowStack.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: rowStack.widthAnchor).isActive = true
+        }
+        let cardHeight = 10 + 52 + 10 + CGFloat(rows.count) * 34 + CGFloat(max(0, rows.count - 1)) * 3 + 10
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 112), accent.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12), accent.centerYAnchor.constraint(equalTo: centerYAnchor), accent.widthAnchor.constraint(equalToConstant: 4), accent.heightAnchor.constraint(equalToConstant: 72),
-            image.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 14), image.centerYAnchor.constraint(equalTo: centerYAnchor), image.widthAnchor.constraint(equalToConstant: 48), image.heightAnchor.constraint(equalToConstant: 48),
-            title.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 16), title.topAnchor.constraint(equalTo: topAnchor, constant: 22), title.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -18),
-            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5), detail.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -16),
-            state.leadingAnchor.constraint(equalTo: title.leadingAnchor), state.topAnchor.constraint(equalTo: detail.bottomAnchor, constant: 7),
-            more.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20), more.centerYAnchor.constraint(equalTo: centerYAnchor), more.widthAnchor.constraint(equalToConstant: 92),
-            openButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -8), openButton.centerYAnchor.constraint(equalTo: centerYAnchor), openButton.widthAnchor.constraint(equalToConstant: 112)
+            heightAnchor.constraint(equalToConstant: cardHeight),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20), header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            header.topAnchor.constraint(equalTo: topAnchor, constant: 10), header.heightAnchor.constraint(equalToConstant: 52),
+            accent.leadingAnchor.constraint(equalTo: header.leadingAnchor), accent.centerYAnchor.constraint(equalTo: header.centerYAnchor), accent.widthAnchor.constraint(equalToConstant: 3), accent.heightAnchor.constraint(equalToConstant: 38),
+            image.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 10), image.centerYAnchor.constraint(equalTo: header.centerYAnchor), image.widthAnchor.constraint(equalToConstant: 38), image.heightAnchor.constraint(equalToConstant: 38),
+            title.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 10), title.topAnchor.constraint(equalTo: header.topAnchor, constant: 5), title.trailingAnchor.constraint(equalTo: statePill.leadingAnchor, constant: -7),
+            statePill.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 7), statePill.centerYAnchor.constraint(equalTo: title.centerYAnchor), statePill.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -10),
+            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3), detail.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -10),
+            more.trailingAnchor.constraint(equalTo: header.trailingAnchor), more.centerYAnchor.constraint(equalTo: header.centerYAnchor), more.widthAnchor.constraint(equalToConstant: 82),
+            usageButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -6), usageButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), usageButton.widthAnchor.constraint(equalToConstant: 88),
+            openButton.trailingAnchor.constraint(equalTo: usageButton.leadingAnchor, constant: -6), openButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), openButton.widthAnchor.constraint(equalToConstant: 102),
+            rowStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28), rowStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            rowStack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10), rowStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:)") }
@@ -98,17 +214,27 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var countLabel: NSTextField!
     var addButton: NSButton!
     var restoreButton: NSPopUpButton!
+    var modeControl: NSSegmentedControl!
     var operationIndicator: NSProgressIndicator!
+    var chooserPreviewMode = false
+    var chooserPreviewButtons: [ProfileButton] = []
+    var chooserPreviewDoneButton: NSButton?
+    var chooserPreviewSelection: String?
     var timer: Timer?
     var busy = false
     var lastState = ""
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(helperProfilesDidChange(_:)), name: helperProfilesDidChangeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(usageDidRefresh(_:)), name: usageDidRefreshNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(showChooserPreviewFromHelper(_:)), name: helperRequestsChooserPreviewNotification, object: nil)
         buildMenu(); buildWindow(); reload()
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in if self?.busy == false { self?.reload() } }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window.makeKeyAndOrderFront(nil); return true }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+    @objc func helperProfilesDidChange(_ note: Notification) { reload(force: true) }
+    @objc func usageDidRefresh(_ note: Notification) { reload(force: true) }
     func buildMenu() {
         let main = NSMenu(); let appItem = NSMenuItem(); let app = NSMenu()
         app.addItem(withTitle: "About Multi Claude", action: #selector(about), keyEquivalent: "").target = self
@@ -117,6 +243,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let file = NSMenuItem(title: "File", action: nil, keyEquivalent: ""); let fileMenu = NSMenu(title: "File")
         fileMenu.addItem(withTitle: "Add Account…", action: #selector(addAccount), keyEquivalent: "n").target = self
         fileMenu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
+        fileMenu.addItem(withTitle: "Refresh Usage", action: #selector(refreshUsage), keyEquivalent: "").target = self
         fileMenu.addItem(withTitle: "Check Setup…", action: #selector(checkSetup), keyEquivalent: "").target = self
         fileMenu.addItem(withTitle: "Show Account Apps", action: #selector(showLaunchers), keyEquivalent: "").target = self
         let routing = NSMenu(); let routingItem = fileMenu.addItem(withTitle: "Login Links", action: nil, keyEquivalent: "")
@@ -135,11 +262,22 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func buildWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 600), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Multi Claude"; window.minSize = NSSize(width: 720, height: 420); window.isReleasedWhenClosed = false; window.delegate = self
-        let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor; window.contentView = view
-        let title = managerLabel("Your Claude accounts", size: 28, weight: .bold); view.addSubview(title)
-        let subtitle = managerLabel("Separate sign-ins. Account names and colored tags.", size: 14, color: .secondaryLabelColor); view.addSubview(subtitle)
-        addButton = managerButton("+ Add Account", target: self, action: #selector(addAccount)); view.addSubview(addButton)
-        countLabel = managerLabel("", size: 12, weight: .medium, color: .secondaryLabelColor); view.addSubview(countLabel)
+        let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = managerCanvasColor.cgColor; window.contentView = view
+        let brand = NSImageView(); brand.image = iconImage("orange", size: 96); brand.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(brand)
+        let eyebrow = managerLabel("MULTI CLAUDE  /  ACCOUNT STUDIO", size: 10, weight: .bold, color: managerTerracotta)
+        eyebrow.attributedStringValue = NSAttributedString(string: "MULTI CLAUDE  /  ACCOUNT STUDIO", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: managerTerracotta, .kern: 1.15
+        ]); view.addSubview(eyebrow)
+        let title = managerLabel("Your Claude studio", size: 27, weight: .bold); view.addSubview(title)
+        let subtitle = managerLabel("A clearer view of every sign-in and its usage.", size: 13, color: .secondaryLabelColor); view.addSubview(subtitle)
+        addButton = managerButton("＋  Add account", target: self, action: #selector(addAccount)); managerPrimaryButton(addButton); view.addSubview(addButton)
+        modeControl = NSSegmentedControl(labels: ["Accounts", "Chooser Preview"], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
+        modeControl.translatesAutoresizingMaskIntoConstraints = false; modeControl.selectedSegment = 0; view.addSubview(modeControl)
+        modeControl.setAccessibilityLabel("Project manager view")
+        countLabel = managerLabel("", size: 11, weight: .medium, color: .secondaryLabelColor)
+        countLabel.alignment = .center; countLabel.wantsLayer = true
+        countLabel.layer?.backgroundColor = managerChipColor.cgColor; countLabel.layer?.cornerRadius = 10
+        view.addSubview(countLabel)
         restoreButton = NSPopUpButton(frame: .zero, pullsDown: true); restoreButton.translatesAutoresizingMaskIntoConstraints = false; restoreButton.bezelStyle = .rounded; view.addSubview(restoreButton)
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
         let document = AccountDocumentView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
@@ -148,10 +286,13 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         operationIndicator = NSProgressIndicator(); operationIndicator.style = .spinning; operationIndicator.controlSize = .small
         operationIndicator.isDisplayedWhenStopped = false; operationIndicator.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(operationIndicator)
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28), title.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor), subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 7),
-            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28), addButton.centerYAnchor.constraint(equalTo: title.centerYAnchor), addButton.widthAnchor.constraint(equalToConstant: 132), title.trailingAnchor.constraint(lessThanOrEqualTo: addButton.leadingAnchor, constant: -20),
-            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor), countLabel.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 22),
+            brand.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28), brand.topAnchor.constraint(equalTo: view.topAnchor, constant: 22), brand.widthAnchor.constraint(equalToConstant: 44), brand.heightAnchor.constraint(equalToConstant: 44),
+            eyebrow.leadingAnchor.constraint(equalTo: brand.trailingAnchor, constant: 12), eyebrow.topAnchor.constraint(equalTo: brand.topAnchor, constant: 1),
+            title.leadingAnchor.constraint(equalTo: eyebrow.leadingAnchor), title.topAnchor.constraint(equalTo: eyebrow.bottomAnchor, constant: 2),
+            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor), subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
+            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28), addButton.centerYAnchor.constraint(equalTo: title.centerYAnchor), addButton.widthAnchor.constraint(equalToConstant: 142), addButton.heightAnchor.constraint(equalToConstant: 34), title.trailingAnchor.constraint(lessThanOrEqualTo: addButton.leadingAnchor, constant: -20),
+            modeControl.leadingAnchor.constraint(equalTo: brand.leadingAnchor), modeControl.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 17), modeControl.widthAnchor.constraint(equalToConstant: 230),
+            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor), countLabel.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: 10), countLabel.widthAnchor.constraint(equalToConstant: 192), countLabel.heightAnchor.constraint(equalToConstant: 24),
             restoreButton.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), restoreButton.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
             scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), scroll.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 14), scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -18),
             document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor), document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
@@ -165,25 +306,82 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard fm.fileExists(atPath: rootPath() + "/config.json") else { showWelcome(); return }
         do {
             let c = try configuration(); let running = runningInstances(c)
-            let state = c.profiles.map { "\($0.id):\($0.name):\($0.iconColor):\(running[$0.id]?.processIdentifier ?? 0)" }.joined(separator: "|") + c.removedProfiles.map(\.id).joined(separator: ",") + (c.loginRoutingMode ?? "native")
+            let state = c.profiles.map { "\($0.id):\($0.name):\($0.iconColor):\(running[$0.id]?.processIdentifier ?? 0)" }.joined(separator: "|") + c.removedProfiles.map(\.id).joined(separator: ",") + (c.loginRoutingMode ?? "native") + (chooserPreviewMode ? ":preview" : ":accounts")
             guard force || state != lastState else { return }; lastState = state
             clearCards(); countLabel.stringValue = "\(c.profiles.count) accounts · \(running.filter { key, _ in c.profiles.contains(where: { $0.id == key }) }.count) running"
+            modeControl.selectedSegment = chooserPreviewMode ? 1 : 0
+            countLabel.isHidden = chooserPreviewMode
+            restoreButton.isHidden = chooserPreviewMode || c.removedProfiles.isEmpty
+            if chooserPreviewMode {
+                renderChooserPreview(c)
+                status.stringValue = "Preview only · choosing Done sends no sign-in link."
+                updateLoginModeMenu(c)
+                return
+            }
+            let usage = UsageCacheFile.load().profiles
             for p in c.profiles {
                 let legacy = running[p.id]?.bundleURL?.standardizedFileURL.path == c.appPath
-                let card = AccountCard(p, running: running[p.id] != nil, needsReopen: legacy, target: self)
+                let card = AccountCard(p, running: running[p.id] != nil, needsReopen: legacy,
+                                       usage: usage[p.id], target: self)
                 stack.addArrangedSubview(card); card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
-            addButton.title = "+ Add Account"; addButton.action = #selector(addAccount)
+            addButton.title = "＋  Add account"; addButton.action = #selector(addAccount)
             let menu = NSMenu(); menu.addItem(withTitle: "Restore Profile", action: nil, keyEquivalent: "")
             for p in c.removedProfiles { let item = menu.addItem(withTitle: p.name, action: #selector(restoreAccount(_:)), keyEquivalent: ""); item.target = self; item.representedObject = p.id }
             restoreButton.menu = menu; restoreButton.isHidden = c.removedProfiles.isEmpty
             status.stringValue = c.usesLoginChooser ? "Login links: choose the account where you started sign-in. File → Login Links changes the mode." : "Native sign-in enabled. Sign-in trouble? Choose Manage → Retry Native Sign-in."
-            if let routing = NSApp.mainMenu?.item(withTitle: "File")?.submenu?.item(withTitle: "Login Links")?.submenu {
-                for item in routing.items { item.state = (item.representedObject as? String == (c.usesLoginChooser ? "chooser" : "native")) ? .on : .off }
-            }
+            updateLoginModeMenu(c)
         } catch { status.stringValue = "Setup needs attention. Use File → Check Setup for details." }
     }
-    func clearCards() { for v in stack.arrangedSubviews { stack.removeArrangedSubview(v); v.removeFromSuperview() } }
+    func updateLoginModeMenu(_ c: Configuration) {
+        if let routing = NSApp.mainMenu?.item(withTitle: "File")?.submenu?.item(withTitle: "Login Links")?.submenu {
+            for item in routing.items { item.state = (item.representedObject as? String == (c.usesLoginChooser ? "chooser" : "native")) ? .on : .off }
+        }
+    }
+    func renderChooserPreview(_ c: Configuration) {
+        chooserPreviewButtons.removeAll(); chooserPreviewSelection = nil; chooserPreviewDoneButton = nil
+        let title = managerLabel("Choose a Claude profile", size: 22, weight: .bold); stack.addArrangedSubview(title); title.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let subtitle = NSTextField(wrappingLabelWithString: "This is how the sign-in chooser appears. Select an account to see the selected state; this preview never sends a link.")
+        subtitle.font = .systemFont(ofSize: 13); subtitle.textColor = .secondaryLabelColor; subtitle.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(subtitle); subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        if c.profiles.isEmpty {
+            let empty = managerLabel("Add an account to preview the chooser.", size: 14, color: .secondaryLabelColor)
+            stack.addArrangedSubview(empty); empty.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        for p in c.profiles {
+            let button = ProfileButton(p, available: true, subtitle: "Preview only · no link will be sent")
+            button.target = self; button.action = #selector(selectChooserPreviewProfile(_:)); stack.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true; chooserPreviewButtons.append(button)
+        }
+        let done = managerButton("Done", target: self, action: #selector(finishChooserPreview)); done.isEnabled = false; chooserPreviewDoneButton = done
+        let cancel = managerButton("Cancel", target: self, action: #selector(finishChooserPreview))
+        let actions = NSView(); actions.translatesAutoresizingMaskIntoConstraints = false; actions.addSubview(cancel); actions.addSubview(done); stack.addArrangedSubview(actions)
+        NSLayoutConstraint.activate([
+            actions.widthAnchor.constraint(equalTo: stack.widthAnchor), actions.heightAnchor.constraint(equalToConstant: 34),
+            done.trailingAnchor.constraint(equalTo: actions.trailingAnchor), done.centerYAnchor.constraint(equalTo: actions.centerYAnchor),
+            cancel.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8), cancel.centerYAnchor.constraint(equalTo: actions.centerYAnchor)
+        ])
+    }
+    @objc func selectChooserPreviewProfile(_ sender: ProfileButton) {
+        chooserPreviewSelection = sender.profile.id
+        for button in chooserPreviewButtons { button.selected = button === sender }
+        chooserPreviewDoneButton?.isEnabled = true
+    }
+    @objc func finishChooserPreview() {
+        chooserPreviewMode = false; chooserPreviewSelection = nil; modeControl.selectedSegment = 0; reload(force: true)
+    }
+    @objc func changeMode(_ sender: NSSegmentedControl) {
+        chooserPreviewMode = sender.selectedSegment == 1; reload(force: true)
+    }
+    @objc func showChooserPreviewFromHelper(_ note: Notification) {
+        if !chooserPreviewMode { chooserPreviewMode = true; modeControl.selectedSegment = 1; reload(force: true) }
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        DistributedNotificationCenter.default().post(name: managerOpenedChooserPreviewNotification, object: nil)
+    }
+    func clearCards() {
+        for v in stack.arrangedSubviews { stack.removeArrangedSubview(v); v.removeFromSuperview() }
+        chooserPreviewButtons.removeAll(); chooserPreviewDoneButton = nil
+    }
     func showWelcome() {
         guard lastState != "welcome" else { return }; lastState = "welcome"; clearCards(); restoreButton.isHidden = true
         countLabel.stringValue = "Get started with two profiles"
@@ -204,7 +402,11 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } catch { problem = "The operation could not start. Reinstall Multi Claude to repair it." }
             DispatchQueue.main.async {
                 self.busy = false; self.addButton.isEnabled = true; self.operationIndicator.stopAnimation(nil); self.reload(force: true)
-                if let problem { showError(problem) } else { success?() }
+                if let problem { showError(problem) }
+                else {
+                    DistributedNotificationCenter.default().post(name: managerProfilesDidChangeNotification, object: nil)
+                    success?()
+                }
             }
         }
     }
@@ -239,6 +441,16 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         do { let c = try configuration(); try beginOpening(c, profile(c, id)) }
         catch { busy = false; addButton.isEnabled = true; operationIndicator.stopAnimation(nil); showError(error.localizedDescription) }
     }
+    @objc func openUsage(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue, let c = try? configuration(), let p = try? profile(c, id) else { return }
+        openUsagePage(p) { [weak self] problem in
+            guard let problem else { return }
+            DispatchQueue.main.async {
+                self?.status.stringValue = "Could not open Usage for \(p.name)."
+                showError(problem + "\n\nOpen this account, then choose Settings → Usage in Claude.")
+            }
+        }
+    }
     func beginOpening(_ c: Configuration, _ p: Profile) {
         guard !busy else { return }
         busy = true; addButton.isEnabled = false; status.stringValue = "Opening \(p.name)…"; operationIndicator.startAnimation(nil)
@@ -247,7 +459,10 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func finishOpening(_ p: Profile, _ problem: String?) {
         busy = false; addButton.isEnabled = true; operationIndicator.stopAnimation(nil); reload(force: true)
         if let problem { status.stringValue = "Could not open \(p.name)."; showError(problem) }
-        else { status.stringValue = "Opened \(p.name). Complete sign-in in its Claude window." }
+        else {
+            DistributedNotificationCenter.default().post(name: managerProfilesDidChangeNotification, object: nil)
+            status.stringValue = "Opened \(p.name). Complete sign-in in its Claude window."
+        }
     }
     @objc func renameAccount(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
@@ -323,6 +538,10 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func restoreAccount(_ sender: NSMenuItem) { if let id = sender.representedObject as? String { execute(["restore", id], message: "Restoring your account launcher…") } }
     @objc func refresh() { reload(force: true) }
+    @objc func refreshUsage() {
+        DistributedNotificationCenter.default().post(name: managerRequestsUsageRefreshNotification, object: nil)
+        status.stringValue = "Refreshing 5-hour and weekly usage…"
+    }
     @objc func showLaunchers() { if let c = try? configuration() { NSWorkspace.shared.open(URL(fileURLWithPath: c.applicationsDir)) } }
     @objc func checkSetup() { execute(["doctor"], message: "Checking your installation…") { showError("Your profile folders, app launchers, and enabled login routing passed their checks.") } }
     @objc func about() { showError("Multi Claude 1.3\n\nOne native Claude app and tagged Dock icon per account. The startup bootstrap becomes the Claude process. The manager and menu helper have no Dock icons.\n\nAccount copies are locally signed. Enterprise sign-in, passkeys, and Code/Cowork compatibility remain unverified.\n\nInspired by am-will/multi-codex-app (MIT).") }

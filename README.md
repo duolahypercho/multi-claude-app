@@ -21,6 +21,8 @@ When upgrading from the old launcher version, existing Claude windows stay open.
 
 Use the **stack icon in the menu bar → Profile Management** to open the account switcher. It shows the full account name/email and a colored tag, such as **P1**, **S2**, or **W3**. Click **Open Claude** to switch to that account. You can also open Multi Claude from Finder; its window appears without a Dock icon.
 
+The account cards show Claude's **Current session** and **This week** subscription percentages as meters, along with any scoped weekly model limits Claude returns. The menu-bar list shows each account's 5-hour and weekly percentages inline, and **Refresh Usage** requests an immediate update. Multi Claude reads each profile's local Claude session cookies, uses the macOS **Claude Safe Storage** Keychain item to decrypt them in memory, and requests the usage data from Claude's private web endpoint every five minutes. Its local usage cache contains only percentages, reset times, account profile IDs, and refresh status; session cookies are never copied into the cache. This endpoint is undocumented and may change. Choose **Chooser Preview** in the manager (or **Preview Login Chooser in Manager** from the menu bar) to see the sign-in chooser inline; it is only a preview and never sends a link.
+
 Labels are yours to set; they do not read or change the authenticated email. Native Claude windows run inside each account app. The same tagged icon identifies the account in the Dock, Finder, manager, and menu bar. Double-clicking an account app selects its saved profile without needing Terminal arguments.
 
 Double-click **Start Claude Profiles.command** in the project folder to build/install on first use and open the manager.
