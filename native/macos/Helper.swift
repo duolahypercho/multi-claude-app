@@ -94,12 +94,14 @@ final class Helper: NSObject, NSApplicationDelegate {
     }
     func applicationDidFinishLaunching(_ note: Notification) {
         if previewMode { ready = true; preview(); return }
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(managerProfilesDidChange(_:)), name: managerProfilesDidChangeNotification, object: nil)
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "Multi Claude profiles")
         rebuildMenu(); claim(); ready = true; processNext()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.claim(); self?.rebuildMenu() }
         if CommandLine.arguments.count == 1 { preview() }
     }
+    @objc func managerProfilesDidChange(_ note: Notification) { claim(); rebuildMenu() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { preview(); return false }
     func claim() {
         guard let c = try? configuration(), c.integrationEnabled && c.usesLoginChooser else { return }
@@ -140,7 +142,11 @@ final class Helper: NSObject, NSApplicationDelegate {
     }
     func finishOperation(_ problem: String?) {
         operationInProgress = false; progressIndicator?.stopAnimation(nil); progressPanel?.orderOut(nil)
-        if let problem { showError(problem) } else { rebuildMenu() }
+        if let problem { showError(problem) }
+        else {
+            rebuildMenu()
+            DistributedNotificationCenter.default().post(name: helperProfilesDidChangeNotification, object: nil)
+        }
     }
     @objc func launchProfile(_ sender: NSMenuItem) {
         guard !operationInProgress, let id = sender.representedObject as? String else { return }

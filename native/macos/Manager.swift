@@ -103,12 +103,14 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var busy = false
     var lastState = ""
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(helperProfilesDidChange(_:)), name: helperProfilesDidChangeNotification, object: nil)
         buildMenu(); buildWindow(); reload()
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in if self?.busy == false { self?.reload() } }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window.makeKeyAndOrderFront(nil); return true }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+    @objc func helperProfilesDidChange(_ note: Notification) { reload(force: true) }
     func buildMenu() {
         let main = NSMenu(); let appItem = NSMenuItem(); let app = NSMenu()
         app.addItem(withTitle: "About Multi Claude", action: #selector(about), keyEquivalent: "").target = self
@@ -204,7 +206,11 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } catch { problem = "The operation could not start. Reinstall Multi Claude to repair it." }
             DispatchQueue.main.async {
                 self.busy = false; self.addButton.isEnabled = true; self.operationIndicator.stopAnimation(nil); self.reload(force: true)
-                if let problem { showError(problem) } else { success?() }
+                if let problem { showError(problem) }
+                else {
+                    DistributedNotificationCenter.default().post(name: managerProfilesDidChangeNotification, object: nil)
+                    success?()
+                }
             }
         }
     }
@@ -247,7 +253,10 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func finishOpening(_ p: Profile, _ problem: String?) {
         busy = false; addButton.isEnabled = true; operationIndicator.stopAnimation(nil); reload(force: true)
         if let problem { status.stringValue = "Could not open \(p.name)."; showError(problem) }
-        else { status.stringValue = "Opened \(p.name). Complete sign-in in its Claude window." }
+        else {
+            DistributedNotificationCenter.default().post(name: managerProfilesDidChangeNotification, object: nil)
+            status.stringValue = "Opened \(p.name). Complete sign-in in its Claude window."
+        }
     }
     @objc func renameAccount(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }

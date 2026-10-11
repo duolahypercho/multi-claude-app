@@ -3,6 +3,8 @@ import CoreServices
 import Darwin
 
 let helperID = "local.multi-claude-app"
+let managerProfilesDidChangeNotification = Notification.Name(helperID + ".manager-profiles-changed")
+let helperProfilesDidChangeNotification = Notification.Name(helperID + ".helper-profiles-changed")
 let claudeID = "com.anthropic.claudefordesktop"
 let iconColors = ["orange", "blue", "purple", "teal", "yellow"]
 let fm = FileManager.default
