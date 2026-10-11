@@ -65,7 +65,7 @@ final class AccountCard: NSView {
         let openButton = managerButton("Open Claude", target: target, action: #selector(ManagerDelegate.openAccount(_:)))
         openButton.identifier = NSUserInterfaceItemIdentifier(p.id); addSubview(openButton)
         openButton.setAccessibilityLabel("Open Claude for " + p.name)
-        let usageButton = managerButton("Usage", target: target, action: #selector(ManagerDelegate.openUsage(_:)))
+        let usageButton = managerButton("5h + Weekly", target: target, action: #selector(ManagerDelegate.openUsage(_:)))
         usageButton.identifier = NSUserInterfaceItemIdentifier(p.id); addSubview(usageButton)
         usageButton.setAccessibilityLabel("Open 5-hour and weekly Claude usage for " + p.name)
         let more = NSPopUpButton(frame: .zero, pullsDown: true); more.translatesAutoresizingMaskIntoConstraints = false; more.bezelStyle = .rounded
@@ -88,7 +88,7 @@ final class AccountCard: NSView {
             detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5), detail.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -16),
             state.leadingAnchor.constraint(equalTo: title.leadingAnchor), state.topAnchor.constraint(equalTo: detail.bottomAnchor, constant: 7),
             more.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20), more.centerYAnchor.constraint(equalTo: centerYAnchor), more.widthAnchor.constraint(equalToConstant: 92),
-            usageButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -8), usageButton.centerYAnchor.constraint(equalTo: centerYAnchor), usageButton.widthAnchor.constraint(equalToConstant: 72),
+            usageButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -8), usageButton.centerYAnchor.constraint(equalTo: centerYAnchor), usageButton.widthAnchor.constraint(equalToConstant: 104),
             openButton.trailingAnchor.constraint(equalTo: usageButton.leadingAnchor, constant: -8), openButton.centerYAnchor.constraint(equalTo: centerYAnchor), openButton.widthAnchor.constraint(equalToConstant: 112)
         ])
     }

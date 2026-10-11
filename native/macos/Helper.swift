@@ -119,13 +119,13 @@ final class Helper: NSObject, NSApplicationDelegate {
                 let item = menu.addItem(withTitle: p.displayName + (running[p.id] == nil ? "" : "  •"), action: #selector(launchProfile(_:)), keyEquivalent: "")
                 item.representedObject = p.id; item.target = self; item.image = profileImage(p, size: 20)
             }
-            let usageMenu = NSMenu()
+            menu.addItem(.separator())
+            let usageHeading = menu.addItem(withTitle: "5-hour + Weekly Usage", action: nil, keyEquivalent: "")
+            usageHeading.isEnabled = false
             for p in c.profiles {
-                let item = usageMenu.addItem(withTitle: p.displayName, action: #selector(openUsage(_:)), keyEquivalent: "")
-                item.representedObject = p.id; item.target = self
+                let item = menu.addItem(withTitle: p.displayName, action: #selector(openUsage(_:)), keyEquivalent: "")
+                item.representedObject = p.id; item.target = self; item.image = profileImage(p, size: 20)
             }
-            let usageItem = menu.addItem(withTitle: "5-hour + Weekly Usage", action: nil, keyEquivalent: "")
-            usageItem.submenu = usageMenu
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Add Profile…", action: #selector(addProfile), keyEquivalent: "").target = self
