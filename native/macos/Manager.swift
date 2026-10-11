@@ -278,10 +278,18 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func removeAccount(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
-        let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "Quit this account with Command-Q first. Its app will be removed, with all account data kept so you can restore it later."
+        if runningInstances(c)[id] != nil {
+            status.stringValue = "Quit \(p.name) before removing it."
+            showError("Quit Claude for \(p.name) with Command-Q, then choose Remove Profile again. Its app and account data have not been changed.")
+            return
+        }
+        let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "This removes its Claude app from the active account list. All account data is kept, and you can restore the profile later."
         alert.addButton(withTitle: "Remove Profile"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        execute(["remove", id], message: "Removing the launcher and keeping its data…")
+        execute(["remove", id], message: "Removing the Claude app and keeping its data…") {
+            self.reload(force: true)
+            self.status.stringValue = "Removed \(p.name). Its account data is saved and can be restored."
+        }
     }
     @objc func restoreAccount(_ sender: NSMenuItem) { if let id = sender.representedObject as? String { execute(["restore", id], message: "Restoring your account launcher…") } }
     @objc func refresh() { reload(force: true) }
