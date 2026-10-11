@@ -148,26 +148,32 @@ func commandLine(_ pid: pid_t) -> String? {
 }
 func runningInstances(_ c: Configuration) -> [String: NSRunningApplication] {
     let profiles = c.profiles + c.removedProfiles
-    let apps = NSWorkspace.shared.runningApplications.filter { app in
-        guard !app.isTerminated, let path = app.bundleURL?.standardizedFileURL.path else { return false }
-        if path == c.appPath { return true }
-        return profiles.contains { $0.launcherPath == path && isNativeProfileApp(path) }
-    }
-    let commands = apps.compactMap { app -> (NSRunningApplication, String)? in
-        guard let cmd = commandLine(app.processIdentifier) else { return nil }; return (app, cmd)
-    }
     var result = [String: NSRunningApplication]()
-    for p in profiles {
-        let matches = commands.filter { app, cmd in
-            let native = app.bundleURL?.standardizedFileURL.path == p.launcherPath
-            if native {
-                guard let executable = nativeExecutable(p.launcherPath), cmd.hasPrefix(executable + " ") else { return false }
-            }
-            if !native && p.userDataDir.isEmpty { return !cmd.contains("--user-data-dir") && !cmd.contains("--user-data-path") }
+    var originalApps = [NSRunningApplication]()
+    let profilesByID = Dictionary(profiles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    for app in NSWorkspace.shared.runningApplications where !app.isTerminated {
+        guard let path = app.bundleURL?.standardizedFileURL.path else { continue }
+        if path == c.appPath {
+            originalApps.append(app)
+        } else if profiles.contains(where: { $0.launcherPath == path }),
+                  let id = bundleInfo(path)?["MultiClaudeProfileID"] as? String,
+                  let p = profilesByID[id], p.launcherPath == path, ownsBundle(path, profileID: id), isNativeProfileApp(path) {
+            // Each managed account has a unique app bundle ID and path. This
+            // avoids starting a separate `ps` process for every open account
+            // on every tray and manager refresh.
+            result[id] = app
+        }
+    }
+    // Only the legacy official app shared a bundle path between profiles, so
+    // inspect arguments there to tell its original and extra windows apart.
+    for app in originalApps {
+        guard let cmd = commandLine(app.processIdentifier) else { continue }
+        let matches = profiles.filter { p in
+            if p.userDataDir.isEmpty { return !cmd.contains("--user-data-dir") && !cmd.contains("--user-data-path") }
             guard let range = cmd.range(of: "--user-data-dir=" + p.dataPath) else { return false }
             let rest = cmd[range.upperBound...]; return rest.isEmpty || rest.hasPrefix(" --")
         }
-        if matches.count == 1 { result[p.id] = matches[0].0 }
+        if matches.count == 1 { result[matches[0].id] = app }
     }
     return result
 }
@@ -188,29 +194,63 @@ func deliver(_ raw: String, to app: NSRunningApplication) throws {
     if quiet { p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice }
     try p.run(); p.waitUntilExit(); return p.terminationStatus
 }
-@discardableResult func launchOfficial(_ c: Configuration, _ p: Profile) throws -> NSRunningApplication? {
+struct ProfileLaunchRequest {
+    var runningApp: NSRunningApplication?
+    var appPath: String
+    var arguments: [String]
+    var codeConfigDir: String?
+    var environment: [String: String]
+    var schemeHandlers: [(String, String)]
+    var useLoginChooser: Bool
+}
+func prepareProfileLaunch(_ c: Configuration, _ p: Profile) throws -> ProfileLaunchRequest {
     _ = try checkApp(c.appPath)
-    if let app = runningInstances(c)[p.id] {
-        if c.integrationEnabled && !c.usesLoginChooser {
-            let owner = app.bundleURL?.standardizedFileURL.path == c.appPath ? claudeID : helperID + ".profile" + p.id
-            for scheme in c.schemes { try setHandler(scheme, owner) }
-        }
-        app.activate(options: [.activateAllWindows]); return app
+    let running = runningInstances(c)[p.id]
+    if let app = running {
+        let owner = app.bundleURL?.standardizedFileURL.path == c.appPath ? claudeID : helperID + ".profile" + p.id
+        let handlers: [(String, String)] = c.integrationEnabled && !c.usesLoginChooser ? c.schemes.map { ($0, owner) } : []
+        return ProfileLaunchRequest(runningApp: app, appPath: "", arguments: [], codeConfigDir: nil, environment: [:], schemeHandlers: handlers, useLoginChooser: false)
     }
     try makeProfileDirectories(p)
     let native = isNativeProfileApp(p.launcherPath) && ownsBundle(p.launcherPath, profileID: p.id)
-    if native && c.integrationEnabled && !c.usesLoginChooser { for scheme in c.schemes { try setHandler(scheme, helperID + ".profile" + p.id) } }
-    var args = ["-n", native ? p.launcherPath : c.appPath]
+    let handlers: [(String, String)] = c.integrationEnabled && !c.usesLoginChooser && native ? c.schemes.map { ($0, helperID + ".profile" + p.id) } : []
+    var args = [String]()
     var env = ProcessInfo.processInfo.environment
     for key in ["CLAUDE_USER_DATA_DIR", "CLAUDE_CDP_AUTH", "CLAUDE_CONFIG_DIR", "ELECTRON_RUN_AS_NODE"] { env.removeValue(forKey: key) }
     if !native {
-        if !p.codeConfigDir.isEmpty { args += ["--env", "CLAUDE_CONFIG_DIR=" + p.codeConfigDir] }
-        if !p.userDataDir.isEmpty { args += ["--args", "--user-data-dir=" + p.userDataDir] }
+        if !p.userDataDir.isEmpty { args.append("--user-data-dir=" + p.userDataDir) }
     }
-    guard try run("/usr/bin/open", args, environment: env) == 0 else { throw fail("Could not open \(p.displayName).") }
+    return ProfileLaunchRequest(runningApp: nil, appPath: native ? p.launcherPath : c.appPath,
+                                arguments: args, codeConfigDir: native || p.codeConfigDir.isEmpty ? nil : p.codeConfigDir,
+                                environment: env, schemeHandlers: handlers, useLoginChooser: c.integrationEnabled && c.usesLoginChooser)
+}
+func openProfile(_ request: ProfileLaunchRequest) throws {
+    for (scheme, owner) in request.schemeHandlers { try setHandler(scheme, owner) }
+    if request.runningApp != nil { return }
+    var arguments = ["-n", request.appPath]
+    if let codeConfigDir = request.codeConfigDir { arguments += ["--env", "CLAUDE_CONFIG_DIR=" + codeConfigDir] }
+    if !request.arguments.isEmpty { arguments += ["--args"] + request.arguments }
+    guard try run("/usr/bin/open", arguments, environment: request.environment) == 0 else { throw fail("Could not open the Claude account app. Try again, or run Multi Claude → Check Setup.") }
     // Claude re-registers its schemes at startup. The menu helper reclaims them too.
-    if c.integrationEnabled && c.usesLoginChooser { for scheme in c.schemes { try? setHandler(scheme, helperID) } }
-    return nil
+    if request.useLoginChooser { for scheme in ["claude", "msauth." + claudeID] { try? setHandler(scheme, helperID) } }
+}
+@discardableResult func launchOfficial(_ c: Configuration, _ p: Profile) throws -> NSRunningApplication? {
+    let request = try prepareProfileLaunch(c, p)
+    try openProfile(request)
+    request.runningApp?.activate(options: [.activateAllWindows])
+    return request.runningApp
+}
+func launchOfficial(_ c: Configuration, _ p: Profile, completion: @escaping (String?) -> Void) {
+    DispatchQueue.global(qos: .userInitiated).async {
+        var runningApp: NSRunningApplication?
+        var message: String?
+        do { let request = try prepareProfileLaunch(c, p); runningApp = request.runningApp; try openProfile(request) }
+        catch { message = error.localizedDescription }
+        DispatchQueue.main.async {
+            if message == nil { runningApp?.activate(options: [.activateAllWindows]) }
+            completion(message)
+        }
+    }
 }
 func launch(_ c: Configuration, _ p: Profile) throws {
     // Launch directly. A second visible wrapper app adds an unwanted Dock icon.
