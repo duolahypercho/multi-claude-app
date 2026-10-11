@@ -179,9 +179,9 @@ func deliver(_ raw: String, to app: NSRunningApplication) throws {
     if quiet { p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice }
     try p.run(); p.waitUntilExit(); return p.terminationStatus
 }
-func launchOfficial(_ c: Configuration, _ p: Profile) throws {
+@discardableResult func launchOfficial(_ c: Configuration, _ p: Profile) throws -> NSRunningApplication? {
     _ = try checkApp(c.appPath)
-    if let app = runningInstances(c)[p.id] { app.activate(options: [.activateAllWindows]); return }
+    if let app = runningInstances(c)[p.id] { app.activate(options: [.activateAllWindows]); return app }
     try makeProfileDirectories(p)
     var args = ["-n", c.appPath]
     var env = ProcessInfo.processInfo.environment
@@ -191,6 +191,7 @@ func launchOfficial(_ c: Configuration, _ p: Profile) throws {
     guard try run("/usr/bin/open", args, environment: env) == 0 else { throw fail("Could not open \(p.displayName).") }
     // Claude re-registers its schemes at startup. The menu helper reclaims them too.
     if c.integrationEnabled && c.usesLoginChooser { for scheme in c.schemes { try? setHandler(scheme, helperID) } }
+    return nil
 }
 func launch(_ c: Configuration, _ p: Profile) throws {
     guard ownsBundle(p.launcherPath, profileID: p.id) else { throw fail("This account launcher is missing. Run setup to repair it.") }

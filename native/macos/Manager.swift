@@ -72,7 +72,7 @@ final class AccountCard: NSView {
         let colors = NSMenu(); for color in iconColors {
             let item = colors.addItem(withTitle: color.capitalized, action: #selector(ManagerDelegate.changeColor(_:)), keyEquivalent: "")
             item.target = target; item.representedObject = [p.id, color]; item.state = color == p.iconColor ? .on : .off
-            item.image = iconImage(color, size: 32); item.image?.size = NSSize(width: 16, height: 16)
+            item.image = iconImage(color, size: 32, tag: ""); item.image?.size = NSSize(width: 16, height: 16)
         }
         let colorItem = menu.addItem(withTitle: "Icon Color", action: nil, keyEquivalent: ""); colorItem.submenu = colors
         menu.addItem(.separator())

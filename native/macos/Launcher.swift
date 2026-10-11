@@ -17,10 +17,13 @@ func runningLauncher(_ p: Profile) -> NSRunningApplication? {
 final class ProfileLauncherDelegate: NSObject, NSApplicationDelegate {
     let id: String
     var timer: Timer?
-    var hasSeenClaude = false
+    var claudeApplication: NSRunningApplication?
     var launchDate = Date()
     init(_ id: String) { self.id = id }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let url = Bundle.main.url(forResource: "ProfileIcon", withExtension: "icns"), let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
         let title = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Claude Account"
         let main = NSMenu(); let item = NSMenuItem(); let menu = NSMenu()
         menu.addItem(withTitle: "Open " + title, action: #selector(openClaude), keyEquivalent: "o").target = self
@@ -34,19 +37,29 @@ final class ProfileLauncherDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { openClaude(); return false }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
     @objc func openClaude() {
-        do { let c = try configuration(); try launchOfficial(c, profile(c, id)) }
+        do {
+            let c = try configuration(); let p = try profile(c, id)
+            if let app = claudeApplication, !app.isTerminated { app.activate(options: [.activateAllWindows]); return }
+            launchDate = Date(); claudeApplication = try launchOfficial(c, p)
+        }
         catch { showError(error.localizedDescription); NSApp.terminate(nil) }
     }
     @objc func manage() {
         if let c = try? configuration(), let path = c.managerPath { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
     }
     func checkRunning() {
+        // Track the selected process after launch instead of scanning every account
+        // in every wrapper. Ten accounts should not spawn hundreds of ps commands.
+        if let app = claudeApplication {
+            if app.isTerminated { NSApp.terminate(nil) }
+            return
+        }
         guard let c = try? configuration(), (try? profile(c, id)) != nil else { NSApp.terminate(nil); return }
         if let app = runningInstances(c)[id] {
-            hasSeenClaude = true
+            claudeApplication = app
             // Launching is asynchronous: focus the intended instance when it appears.
-            if Date().timeIntervalSince(launchDate) < 4 { app.activate(options: [.activateAllWindows]) }
-        } else if hasSeenClaude || Date().timeIntervalSince(launchDate) > 30 { NSApp.terminate(nil) }
+            app.activate(options: [.activateAllWindows])
+        } else if Date().timeIntervalSince(launchDate) > 30 { NSApp.terminate(nil) }
     }
 }
 var profileLauncherDelegate: ProfileLauncherDelegate?
