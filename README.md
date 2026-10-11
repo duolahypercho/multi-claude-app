@@ -21,6 +21,8 @@ When upgrading from the old launcher version, existing Claude windows stay open.
 
 Use the **stack icon in the menu bar → Profile Management** to open the account switcher. It shows the full account name/email and a colored tag, such as **P1**, **S2**, or **W3**. Click **Open Claude** to switch to that account. You can also open Multi Claude from Finder; its window appears without a Dock icon.
 
+Each account card has a **Usage** button, and the menu-bar app has a **5-hour + Weekly Usage** submenu. These open Claude's own Settings → Usage page in the matching account app, where its current session and weekly meters are shown. Anthropic does not document a subscription-usage API for external apps, so Multi Claude opens the authoritative account page instead of estimating or scraping those values. Choose **Chooser Preview** in the manager (or **Preview Login Chooser in Manager** from the menu bar) to see the sign-in chooser inline; it is only a preview and never sends a link.
+
 Labels are yours to set; they do not read or change the authenticated email. Native Claude windows run inside each account app. The same tagged icon identifies the account in the Dock, Finder, manager, and menu bar. Double-clicking an account app selects its saved profile without needing Terminal arguments.
 
 Double-click **Start Claude Profiles.command** in the project folder to build/install on first use and open the manager.

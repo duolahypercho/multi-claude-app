@@ -5,6 +5,8 @@ import Darwin
 let helperID = "local.multi-claude-app"
 let managerProfilesDidChangeNotification = Notification.Name(helperID + ".manager-profiles-changed")
 let helperProfilesDidChangeNotification = Notification.Name(helperID + ".helper-profiles-changed")
+let helperRequestsChooserPreviewNotification = Notification.Name(helperID + ".show-chooser-preview")
+let managerOpenedChooserPreviewNotification = Notification.Name(helperID + ".chooser-preview-opened")
 let claudeID = "com.anthropic.claudefordesktop"
 let iconColors = ["orange", "blue", "purple", "teal", "yellow"]
 let fm = FileManager.default
@@ -241,6 +243,18 @@ func openProfile(_ request: ProfileLaunchRequest) throws {
     guard try run("/usr/bin/open", arguments, environment: request.environment) == 0 else { throw fail("Could not open the Claude account app. Try again, or run Multi Claude → Check Setup.") }
     // Claude re-registers its schemes at startup. The menu helper reclaims them too.
     if request.useLoginChooser { for scheme in ["claude", "msauth." + claudeID] { try? setHandler(scheme, helperID) } }
+}
+func openUsagePage(_ p: Profile, completion: @escaping (String?) -> Void) {
+    guard let url = URL(string: "https://claude.ai/settings/usage") else {
+        completion("Claude's Usage page URL is invalid."); return
+    }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = true
+    NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: p.launcherPath), configuration: configuration) { app, error in
+        if let error { completion("Could not open Usage for \(p.name): \(error.localizedDescription)"); return }
+        app?.activate(options: [.activateAllWindows])
+        completion(nil)
+    }
 }
 @discardableResult func launchOfficial(_ c: Configuration, _ p: Profile) throws -> NSRunningApplication? {
     let request = try prepareProfileLaunch(c, p)

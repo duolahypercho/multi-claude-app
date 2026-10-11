@@ -65,6 +65,9 @@ final class AccountCard: NSView {
         let openButton = managerButton("Open Claude", target: target, action: #selector(ManagerDelegate.openAccount(_:)))
         openButton.identifier = NSUserInterfaceItemIdentifier(p.id); addSubview(openButton)
         openButton.setAccessibilityLabel("Open Claude for " + p.name)
+        let usageButton = managerButton("Usage", target: target, action: #selector(ManagerDelegate.openUsage(_:)))
+        usageButton.identifier = NSUserInterfaceItemIdentifier(p.id); addSubview(usageButton)
+        usageButton.setAccessibilityLabel("Open 5-hour and weekly Claude usage for " + p.name)
         let more = NSPopUpButton(frame: .zero, pullsDown: true); more.translatesAutoresizingMaskIntoConstraints = false; more.bezelStyle = .rounded
         let menu = NSMenu(); menu.addItem(withTitle: "Manage", action: nil, keyEquivalent: "")
         let rename = menu.addItem(withTitle: "Rename / Set Email Label…", action: #selector(ManagerDelegate.renameAccount(_:)), keyEquivalent: ""); rename.target = target; rename.representedObject = p.id
@@ -85,7 +88,8 @@ final class AccountCard: NSView {
             detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 5), detail.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -16),
             state.leadingAnchor.constraint(equalTo: title.leadingAnchor), state.topAnchor.constraint(equalTo: detail.bottomAnchor, constant: 7),
             more.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20), more.centerYAnchor.constraint(equalTo: centerYAnchor), more.widthAnchor.constraint(equalToConstant: 92),
-            openButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -8), openButton.centerYAnchor.constraint(equalTo: centerYAnchor), openButton.widthAnchor.constraint(equalToConstant: 112)
+            usageButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -8), usageButton.centerYAnchor.constraint(equalTo: centerYAnchor), usageButton.widthAnchor.constraint(equalToConstant: 72),
+            openButton.trailingAnchor.constraint(equalTo: usageButton.leadingAnchor, constant: -8), openButton.centerYAnchor.constraint(equalTo: centerYAnchor), openButton.widthAnchor.constraint(equalToConstant: 112)
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:)") }
@@ -98,12 +102,18 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var countLabel: NSTextField!
     var addButton: NSButton!
     var restoreButton: NSPopUpButton!
+    var modeControl: NSSegmentedControl!
     var operationIndicator: NSProgressIndicator!
+    var chooserPreviewMode = false
+    var chooserPreviewButtons: [ProfileButton] = []
+    var chooserPreviewDoneButton: NSButton?
+    var chooserPreviewSelection: String?
     var timer: Timer?
     var busy = false
     var lastState = ""
     func applicationDidFinishLaunching(_ notification: Notification) {
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(helperProfilesDidChange(_:)), name: helperProfilesDidChangeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(showChooserPreviewFromHelper(_:)), name: helperRequestsChooserPreviewNotification, object: nil)
         buildMenu(); buildWindow(); reload()
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in if self?.busy == false { self?.reload() } }
@@ -141,6 +151,9 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let title = managerLabel("Your Claude accounts", size: 28, weight: .bold); view.addSubview(title)
         let subtitle = managerLabel("Separate sign-ins. Account names and colored tags.", size: 14, color: .secondaryLabelColor); view.addSubview(subtitle)
         addButton = managerButton("+ Add Account", target: self, action: #selector(addAccount)); view.addSubview(addButton)
+        modeControl = NSSegmentedControl(labels: ["Accounts", "Chooser Preview"], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
+        modeControl.translatesAutoresizingMaskIntoConstraints = false; modeControl.selectedSegment = 0; view.addSubview(modeControl)
+        modeControl.setAccessibilityLabel("Project manager view")
         countLabel = managerLabel("", size: 12, weight: .medium, color: .secondaryLabelColor); view.addSubview(countLabel)
         restoreButton = NSPopUpButton(frame: .zero, pullsDown: true); restoreButton.translatesAutoresizingMaskIntoConstraints = false; restoreButton.bezelStyle = .rounded; view.addSubview(restoreButton)
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
@@ -153,7 +166,8 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28), title.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor), subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 7),
             addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28), addButton.centerYAnchor.constraint(equalTo: title.centerYAnchor), addButton.widthAnchor.constraint(equalToConstant: 132), title.trailingAnchor.constraint(lessThanOrEqualTo: addButton.leadingAnchor, constant: -20),
-            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor), countLabel.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 22),
+            modeControl.leadingAnchor.constraint(equalTo: title.leadingAnchor), modeControl.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 18), modeControl.widthAnchor.constraint(equalToConstant: 230),
+            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor), countLabel.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: 10),
             restoreButton.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), restoreButton.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
             scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), scroll.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 14), scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -18),
             document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor), document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
@@ -167,9 +181,18 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard fm.fileExists(atPath: rootPath() + "/config.json") else { showWelcome(); return }
         do {
             let c = try configuration(); let running = runningInstances(c)
-            let state = c.profiles.map { "\($0.id):\($0.name):\($0.iconColor):\(running[$0.id]?.processIdentifier ?? 0)" }.joined(separator: "|") + c.removedProfiles.map(\.id).joined(separator: ",") + (c.loginRoutingMode ?? "native")
+            let state = c.profiles.map { "\($0.id):\($0.name):\($0.iconColor):\(running[$0.id]?.processIdentifier ?? 0)" }.joined(separator: "|") + c.removedProfiles.map(\.id).joined(separator: ",") + (c.loginRoutingMode ?? "native") + (chooserPreviewMode ? ":preview" : ":accounts")
             guard force || state != lastState else { return }; lastState = state
             clearCards(); countLabel.stringValue = "\(c.profiles.count) accounts · \(running.filter { key, _ in c.profiles.contains(where: { $0.id == key }) }.count) running"
+            modeControl.selectedSegment = chooserPreviewMode ? 1 : 0
+            countLabel.isHidden = chooserPreviewMode
+            restoreButton.isHidden = chooserPreviewMode || c.removedProfiles.isEmpty
+            if chooserPreviewMode {
+                renderChooserPreview(c)
+                status.stringValue = "Preview only · choosing Done sends no sign-in link."
+                updateLoginModeMenu(c)
+                return
+            }
             for p in c.profiles {
                 let legacy = running[p.id]?.bundleURL?.standardizedFileURL.path == c.appPath
                 let card = AccountCard(p, running: running[p.id] != nil, needsReopen: legacy, target: self)
@@ -180,12 +203,58 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             for p in c.removedProfiles { let item = menu.addItem(withTitle: p.name, action: #selector(restoreAccount(_:)), keyEquivalent: ""); item.target = self; item.representedObject = p.id }
             restoreButton.menu = menu; restoreButton.isHidden = c.removedProfiles.isEmpty
             status.stringValue = c.usesLoginChooser ? "Login links: choose the account where you started sign-in. File → Login Links changes the mode." : "Native sign-in enabled. Sign-in trouble? Choose Manage → Retry Native Sign-in."
-            if let routing = NSApp.mainMenu?.item(withTitle: "File")?.submenu?.item(withTitle: "Login Links")?.submenu {
-                for item in routing.items { item.state = (item.representedObject as? String == (c.usesLoginChooser ? "chooser" : "native")) ? .on : .off }
-            }
+            updateLoginModeMenu(c)
         } catch { status.stringValue = "Setup needs attention. Use File → Check Setup for details." }
     }
-    func clearCards() { for v in stack.arrangedSubviews { stack.removeArrangedSubview(v); v.removeFromSuperview() } }
+    func updateLoginModeMenu(_ c: Configuration) {
+        if let routing = NSApp.mainMenu?.item(withTitle: "File")?.submenu?.item(withTitle: "Login Links")?.submenu {
+            for item in routing.items { item.state = (item.representedObject as? String == (c.usesLoginChooser ? "chooser" : "native")) ? .on : .off }
+        }
+    }
+    func renderChooserPreview(_ c: Configuration) {
+        chooserPreviewButtons.removeAll(); chooserPreviewSelection = nil; chooserPreviewDoneButton = nil
+        let title = managerLabel("Choose a Claude profile", size: 22, weight: .bold); stack.addArrangedSubview(title); title.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let subtitle = NSTextField(wrappingLabelWithString: "This is how the sign-in chooser appears. Select an account to see the selected state; this preview never sends a link.")
+        subtitle.font = .systemFont(ofSize: 13); subtitle.textColor = .secondaryLabelColor; subtitle.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(subtitle); subtitle.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        if c.profiles.isEmpty {
+            let empty = managerLabel("Add an account to preview the chooser.", size: 14, color: .secondaryLabelColor)
+            stack.addArrangedSubview(empty); empty.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
+        for p in c.profiles {
+            let button = ProfileButton(p, available: true, subtitle: "Preview only · no link will be sent")
+            button.target = self; button.action = #selector(selectChooserPreviewProfile(_:)); stack.addArrangedSubview(button)
+            button.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true; chooserPreviewButtons.append(button)
+        }
+        let done = managerButton("Done", target: self, action: #selector(finishChooserPreview)); done.isEnabled = false; chooserPreviewDoneButton = done
+        let cancel = managerButton("Cancel", target: self, action: #selector(finishChooserPreview))
+        let actions = NSView(); actions.translatesAutoresizingMaskIntoConstraints = false; actions.addSubview(cancel); actions.addSubview(done); stack.addArrangedSubview(actions)
+        NSLayoutConstraint.activate([
+            actions.widthAnchor.constraint(equalTo: stack.widthAnchor), actions.heightAnchor.constraint(equalToConstant: 34),
+            done.trailingAnchor.constraint(equalTo: actions.trailingAnchor), done.centerYAnchor.constraint(equalTo: actions.centerYAnchor),
+            cancel.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8), cancel.centerYAnchor.constraint(equalTo: actions.centerYAnchor)
+        ])
+    }
+    @objc func selectChooserPreviewProfile(_ sender: ProfileButton) {
+        chooserPreviewSelection = sender.profile.id
+        for button in chooserPreviewButtons { button.selected = button === sender }
+        chooserPreviewDoneButton?.isEnabled = true
+    }
+    @objc func finishChooserPreview() {
+        chooserPreviewMode = false; chooserPreviewSelection = nil; modeControl.selectedSegment = 0; reload(force: true)
+    }
+    @objc func changeMode(_ sender: NSSegmentedControl) {
+        chooserPreviewMode = sender.selectedSegment == 1; reload(force: true)
+    }
+    @objc func showChooserPreviewFromHelper(_ note: Notification) {
+        if !chooserPreviewMode { chooserPreviewMode = true; modeControl.selectedSegment = 1; reload(force: true) }
+        window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        DistributedNotificationCenter.default().post(name: managerOpenedChooserPreviewNotification, object: nil)
+    }
+    func clearCards() {
+        for v in stack.arrangedSubviews { stack.removeArrangedSubview(v); v.removeFromSuperview() }
+        chooserPreviewButtons.removeAll(); chooserPreviewDoneButton = nil
+    }
     func showWelcome() {
         guard lastState != "welcome" else { return }; lastState = "welcome"; clearCards(); restoreButton.isHidden = true
         countLabel.stringValue = "Get started with two profiles"
@@ -244,6 +313,16 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !busy, let id = sender.identifier?.rawValue else { return }
         do { let c = try configuration(); try beginOpening(c, profile(c, id)) }
         catch { busy = false; addButton.isEnabled = true; operationIndicator.stopAnimation(nil); showError(error.localizedDescription) }
+    }
+    @objc func openUsage(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue, let c = try? configuration(), let p = try? profile(c, id) else { return }
+        openUsagePage(p) { [weak self] problem in
+            guard let problem else { return }
+            DispatchQueue.main.async {
+                self?.status.stringValue = "Could not open Usage for \(p.name)."
+                showError(problem + "\n\nOpen this account, then choose Settings → Usage in Claude.")
+            }
+        }
     }
     func beginOpening(_ c: Configuration, _ p: Profile) {
         guard !busy else { return }

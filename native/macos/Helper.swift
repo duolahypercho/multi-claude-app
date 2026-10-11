@@ -7,12 +7,13 @@ import Darwin
 final class ProfileButton: NSButton {
     let profile: Profile
     let available: Bool
+    let subtitle: String?
     var selected = false { didSet { needsDisplay = true; setAccessibilityValue(selected ? "Selected" : "Not selected") } }
-    init(_ profile: Profile, available: Bool) {
-        self.profile = profile; self.available = available
+    init(_ profile: Profile, available: Bool, subtitle: String? = nil) {
+        self.profile = profile; self.available = available; self.subtitle = subtitle
         super.init(frame: .zero)
         title = ""; isBordered = false; setButtonType(.momentaryChange); isEnabled = available
-        setAccessibilityLabel(profile.name + (available ? ", running" : ", closed"))
+        setAccessibilityLabel(profile.name + ", " + (subtitle ?? (available ? "running" : "closed")))
         translatesAutoresizingMaskIntoConstraints = false; heightAnchor.constraint(equalToConstant: 64).isActive = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:)") }
@@ -24,7 +25,7 @@ final class ProfileButton: NSButton {
         profileImage(profile, size: 32)?.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: available ? 1 : 0.45, respectFlipped: true, hints: [.interpolation: NSImageInterpolation.high])
         let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
         NSAttributedString(string: profile.name, attributes: [.font: NSFont.systemFont(ofSize: 14, weight: .semibold), .foregroundColor: available ? NSColor.labelColor : NSColor.secondaryLabelColor, .paragraphStyle: paragraph]).draw(in: NSRect(x: 60, y: 16, width: max(0, bounds.width - 110), height: 20))
-        NSAttributedString(string: available ? "Running on this Mac" : "Open this profile to continue", attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]).draw(at: NSPoint(x: 60, y: 36))
+        NSAttributedString(string: subtitle ?? (available ? "Running on this Mac" : "Open this profile to continue"), attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]).draw(at: NSPoint(x: 60, y: 36))
         let circle = NSRect(x: bounds.width - 34, y: 24, width: 16, height: 16)
         if selected {
             NSColor.controlAccentColor.setFill(); NSBezierPath(ovalIn: circle).fill()
@@ -87,12 +88,14 @@ final class Helper: NSObject, NSApplicationDelegate {
     var progressPanel: NSPanel?
     var progressIndicator: NSProgressIndicator?
     var progressLabel: NSTextField?
+    var managerPreviewRequestPending = false
     let previewMode: Bool
     init(preview: Bool) { previewMode = preview }
     func applicationWillFinishLaunching(_ note: Notification) {
         NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(receive(_:reply:)), forEventClass: AEEventClass(0x4755524c), andEventID: AEEventID(0x4755524c))
     }
     func applicationDidFinishLaunching(_ note: Notification) {
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(managerOpenedChooserPreview(_:)), name: managerOpenedChooserPreviewNotification, object: nil)
         if previewMode { ready = true; preview(); return }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(managerProfilesDidChange(_:)), name: managerProfilesDidChangeNotification, object: nil)
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -116,10 +119,17 @@ final class Helper: NSObject, NSApplicationDelegate {
                 let item = menu.addItem(withTitle: p.displayName + (running[p.id] == nil ? "" : "  •"), action: #selector(launchProfile(_:)), keyEquivalent: "")
                 item.representedObject = p.id; item.target = self; item.image = profileImage(p, size: 20)
             }
+            let usageMenu = NSMenu()
+            for p in c.profiles {
+                let item = usageMenu.addItem(withTitle: p.displayName, action: #selector(openUsage(_:)), keyEquivalent: "")
+                item.representedObject = p.id; item.target = self
+            }
+            let usageItem = menu.addItem(withTitle: "5-hour + Weekly Usage", action: nil, keyEquivalent: "")
+            usageItem.submenu = usageMenu
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Add Profile…", action: #selector(addProfile), keyEquivalent: "").target = self
-        menu.addItem(withTitle: "Preview Login Chooser…", action: #selector(preview), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Preview Login Chooser in Manager…", action: #selector(preview), keyEquivalent: "").target = self
         menu.addItem(withTitle: "Profile Management…", action: #selector(manage), keyEquivalent: "").target = self
         menu.addItem(withTitle: "About Multi Claude", action: #selector(about), keyEquivalent: "").target = self
         status.menu = menu
@@ -156,6 +166,13 @@ final class Helper: NSObject, NSApplicationDelegate {
             launchOfficial(c, p) { [weak self] problem in self?.finishOperation(problem) }
         } catch { finishOperation(error.localizedDescription) }
     }
+    @objc func openUsage(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
+        openUsagePage(p) { problem in
+            guard let problem else { return }
+            DispatchQueue.main.async { showError(problem + "\n\nOpen this account, then choose Settings → Usage in Claude.") }
+        }
+    }
     @objc func addProfile() {
         let alert = NSAlert(); alert.messageText = "Add a Claude profile"; alert.informativeText = "Give this account a name. It starts with a fresh sign-in."
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 26)); input.placeholderString = "Work or Personal"; alert.accessoryView = input
@@ -178,11 +195,33 @@ final class Helper: NSObject, NSApplicationDelegate {
             }
         } catch { finishOperation(error.localizedDescription) }
     }
-    @objc func manage() {
+    @objc func manage() { openManager(showChooserPreview: false) }
+    func openManager(showChooserPreview: Bool) {
         guard let c = try? configuration() else { return }
         let path = c.managerPath ?? c.applicationsDir + "/Multi Claude.app"
-        if fm.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-        else { showError("Re-run setup to install the Multi Claude account manager.") }
+        guard fm.fileExists(atPath: path) else { showError("Re-run setup to install the Multi Claude account manager."); return }
+        let configuration = NSWorkspace.OpenConfiguration(); configuration.activates = true
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: configuration) { [weak self] _, error in
+            DispatchQueue.main.async {
+                if let error { showError("Could not open the project manager: \(error.localizedDescription)"); return }
+                if showChooserPreview {
+                    self?.managerPreviewRequestPending = true
+                    self?.requestManagerPreview(12)
+                } else if self?.previewMode == true { NSApp.terminate(nil) }
+            }
+        }
+    }
+    func requestManagerPreview(_ attemptsRemaining: Int) {
+        guard managerPreviewRequestPending, attemptsRemaining > 0 else {
+            if previewMode && managerPreviewRequestPending { showError("The project manager did not respond. Open Chooser Preview from its window."); NSApp.terminate(nil) }
+            return
+        }
+        DistributedNotificationCenter.default().post(name: helperRequestsChooserPreviewNotification, object: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.requestManagerPreview(attemptsRemaining - 1) }
+    }
+    @objc func managerOpenedChooserPreview(_ note: Notification) {
+        managerPreviewRequestPending = false
+        if previewMode { NSApp.terminate(nil) }
     }
     @objc func about() {
         let a = NSAlert(); a.messageText = "Multi Claude App 1.3"
@@ -190,11 +229,7 @@ final class Helper: NSObject, NSApplicationDelegate {
         a.runModal()
     }
     @objc func preview() {
-        guard chooser == nil else { return }
-        do {
-            let c = try configuration(); let choice = Chooser(); chooser = choice
-            choice.show(c, preview: true) { [weak self] _ in self?.chooser = nil; if self?.previewMode == true { NSApp.terminate(nil) } else { self?.processNext() } }
-        } catch { showError(error.localizedDescription); if previewMode { NSApp.terminate(nil) } }
+        openManager(showChooserPreview: true)
     }
     @objc func receive(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let raw = event.paramDescriptor(forKeyword: AEKeyword(0x2d2d2d2d))?.stringValue,
