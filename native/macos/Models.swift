@@ -209,7 +209,8 @@ func prepareProfileLaunch(_ c: Configuration, _ p: Profile) throws -> ProfileLau
     if let app = running {
         let owner = app.bundleURL?.standardizedFileURL.path == c.appPath ? claudeID : helperID + ".profile" + p.id
         let handlers: [(String, String)] = c.integrationEnabled && !c.usesLoginChooser ? c.schemes.map { ($0, owner) } : []
-        return ProfileLaunchRequest(runningApp: app, appPath: "", arguments: [], codeConfigDir: nil, environment: [:], schemeHandlers: handlers, useLoginChooser: false)
+        let appPath = app.bundleURL?.standardizedFileURL.path ?? p.launcherPath
+        return ProfileLaunchRequest(runningApp: app, appPath: appPath, arguments: [], codeConfigDir: nil, environment: [:], schemeHandlers: handlers, useLoginChooser: false)
     }
     try makeProfileDirectories(p)
     let native = isNativeProfileApp(p.launcherPath) && ownsBundle(p.launcherPath, profileID: p.id)
@@ -226,7 +227,12 @@ func prepareProfileLaunch(_ c: Configuration, _ p: Profile) throws -> ProfileLau
 }
 func openProfile(_ request: ProfileLaunchRequest) throws {
     for (scheme, owner) in request.schemeHandlers { try setHandler(scheme, owner) }
-    if request.runningApp != nil { return }
+    if request.runningApp != nil {
+        guard !request.appPath.isEmpty, try run("/usr/bin/open", ["-a", request.appPath]) == 0 else {
+            throw fail("Could not bring the Claude account app to the front. Try opening it from the Dock or Applications folder.")
+        }
+        return
+    }
     var arguments = ["-n", request.appPath]
     if let codeConfigDir = request.codeConfigDir { arguments += ["--env", "CLAUDE_CONFIG_DIR=" + codeConfigDir] }
     if !request.arguments.isEmpty { arguments += ["--args"] + request.arguments }
