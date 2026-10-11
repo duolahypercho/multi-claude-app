@@ -98,13 +98,14 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var countLabel: NSTextField!
     var addButton: NSButton!
     var restoreButton: NSPopUpButton!
+    var operationIndicator: NSProgressIndicator!
     var timer: Timer?
     var busy = false
     var lastState = ""
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu(); buildWindow(); reload()
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in if self?.busy == false { self?.reload() } }
+        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in if self?.busy == false { self?.reload() } }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window.makeKeyAndOrderFront(nil); return true }
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
@@ -144,6 +145,8 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let document = AccountDocumentView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
         stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 12; stack.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(stack)
         status = managerLabel("", size: 12, color: .secondaryLabelColor); view.addSubview(status)
+        operationIndicator = NSProgressIndicator(); operationIndicator.style = .spinning; operationIndicator.controlSize = .small
+        operationIndicator.isDisplayedWhenStopped = false; operationIndicator.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(operationIndicator)
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28), title.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
             subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor), subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 7),
@@ -153,7 +156,8 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), scroll.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 14), scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -18),
             document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor), document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
             stack.leadingAnchor.constraint(equalTo: document.leadingAnchor), stack.trailingAnchor.constraint(equalTo: document.trailingAnchor), stack.topAnchor.constraint(equalTo: document.topAnchor), stack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-            status.leadingAnchor.constraint(equalTo: title.leadingAnchor), status.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), status.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20)
+            status.leadingAnchor.constraint(equalTo: title.leadingAnchor), status.trailingAnchor.constraint(lessThanOrEqualTo: operationIndicator.leadingAnchor, constant: -8), status.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -20),
+            operationIndicator.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), operationIndicator.centerYAnchor.constraint(equalTo: status.centerYAnchor), operationIndicator.widthAnchor.constraint(equalToConstant: 16), operationIndicator.heightAnchor.constraint(equalToConstant: 16)
         ])
     }
     func reload(force: Bool = false) {
@@ -189,7 +193,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         addButton.title = "Set Up Accounts"; addButton.action = #selector(setupAccounts); status.stringValue = "Uses the official Claude desktop app installed on this Mac."
     }
     func execute(_ args: [String], message: String, success: (() -> Void)? = nil) {
-        guard !busy else { return }; busy = true; addButton.isEnabled = false; status.stringValue = message
+        guard !busy else { return }; busy = true; addButton.isEnabled = false; status.stringValue = message; operationIndicator.startAnimation(nil)
         let executable = (try? configuration().cliPath) ?? sourceExecutable(); let arguments = ["--root", rootPath()] + args
         DispatchQueue.global(qos: .userInitiated).async {
             let process = Process(); process.executableURL = URL(fileURLWithPath: executable); process.arguments = arguments
@@ -199,7 +203,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 if process.terminationStatus != 0 { problem = String(data: data, encoding: .utf8) ?? "The operation failed." }
             } catch { problem = "The operation could not start. Reinstall Multi Claude to repair it." }
             DispatchQueue.main.async {
-                self.busy = false; self.addButton.isEnabled = true; self.reload(force: true)
+                self.busy = false; self.addButton.isEnabled = true; self.operationIndicator.stopAnimation(nil); self.reload(force: true)
                 if let problem { showError(problem) } else { success?() }
             }
         }
@@ -225,13 +229,25 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let previous = Set((try? configuration().profiles.map(\.id)) ?? [])
         var args = ["add", "--color", iconColors[color.indexOfSelectedItem]]; if !label.isEmpty { args += ["--name", label] }
         execute(args, message: "Creating a separate account profile…") {
-            if let c = try? configuration(), let p = c.profiles.first(where: { !previous.contains($0.id) }) { do { try launch(c, p) } catch { showError(error.localizedDescription) } }
+            if let c = try? configuration(), let p = c.profiles.first(where: { !previous.contains($0.id) }) {
+                self.beginOpening(c, p)
+            }
         }
     }
     @objc func openAccount(_ sender: NSButton) {
-        guard let id = sender.identifier?.rawValue else { return }
-        do { let c = try configuration(); try launch(c, profile(c, id)); status.stringValue = "Opened \(try profile(c, id).name). Complete sign-in in its Claude window." }
-        catch { showError(error.localizedDescription) }
+        guard !busy, let id = sender.identifier?.rawValue else { return }
+        do { let c = try configuration(); try beginOpening(c, profile(c, id)) }
+        catch { busy = false; addButton.isEnabled = true; operationIndicator.stopAnimation(nil); showError(error.localizedDescription) }
+    }
+    func beginOpening(_ c: Configuration, _ p: Profile) {
+        guard !busy else { return }
+        busy = true; addButton.isEnabled = false; status.stringValue = "Opening \(p.name)…"; operationIndicator.startAnimation(nil)
+        launchOfficial(c, p) { [weak self] problem in self?.finishOpening(p, problem) }
+    }
+    func finishOpening(_ p: Profile, _ problem: String?) {
+        busy = false; addButton.isEnabled = true; operationIndicator.stopAnimation(nil); reload(force: true)
+        if let problem { status.stringValue = "Could not open \(p.name)."; showError(problem) }
+        else { status.stringValue = "Opened \(p.name). Complete sign-in in its Claude window." }
     }
     @objc func renameAccount(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
@@ -256,16 +272,54 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         execute(["login-routing", "native"], message: "Preparing Claude's native sign-in…") {
             do { let c = try configuration(); let p = try profile(c, id)
                 showError("Native sign-in is ready for \(p.name).\n\nCancel the previous attempt in Claude, then click its sign-in button again. Choose the intended account in the browser or authentication sheet.\n\nIf the callback opens Primary instead, enable the profile chooser from File → Login Links and retry.")
-                try launch(c, p)
+                self.beginOpening(c, p)
             } catch { showError(error.localizedDescription) }
         }
     }
     @objc func removeAccount(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
-        let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "Quit this account with Command-Q first. Its app will be removed, with all account data kept so you can restore it later."
+        guard !busy, let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
+        if let app = runningInstances(c)[id] {
+            let alert = NSAlert(); alert.messageText = "Claude is still open for \(p.name)"
+            alert.informativeText = "Force quitting will close only this Claude account app. Unsaved work in its window may be lost. The account data on disk will be kept, and you can restore the profile later."
+            alert.addButton(withTitle: "Force Quit & Remove"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            forceQuitAndRemove(p, app)
+            return
+        }
+        let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "This removes its Claude app from the active account list. All account data is kept, and you can restore the profile later."
         alert.addButton(withTitle: "Remove Profile"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        execute(["remove", id], message: "Removing the launcher and keeping its data…")
+        removeClosedProfile(p)
+    }
+    func forceQuitAndRemove(_ p: Profile, _ app: NSRunningApplication) {
+        guard !busy else { return }
+        busy = true; addButton.isEnabled = false; status.stringValue = "Closing Claude for \(p.name)…"; operationIndicator.startAnimation(nil)
+        _ = app.forceTerminate()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let deadline = Date().addingTimeInterval(8)
+            var hasExited = false
+            repeat {
+                hasExited = runningNativeApp(p.launcherPath) == nil
+                if hasExited { break }
+                Thread.sleep(forTimeInterval: 0.2)
+            } while Date() < deadline
+            let exited = hasExited
+            DispatchQueue.main.async {
+                self.busy = false; self.addButton.isEnabled = true; self.operationIndicator.stopAnimation(nil)
+                guard exited else {
+                    self.reload(force: true); self.status.stringValue = "Claude for \(p.name) is still open; the profile was not removed."
+                    showError("Claude could not be closed, so Multi Claude left the profile and its account data unchanged. Quit it manually and try again.")
+                    return
+                }
+                self.removeClosedProfile(p)
+            }
+        }
+    }
+    func removeClosedProfile(_ p: Profile) {
+        execute(["remove", p.id], message: "Removing the Claude app and keeping its data…") {
+            self.reload(force: true)
+            self.status.stringValue = "Removed \(p.name). Its account data is saved and can be restored."
+        }
     }
     @objc func restoreAccount(_ sender: NSMenuItem) { if let id = sender.representedObject as? String { execute(["restore", id], message: "Restoring your account launcher…") } }
     @objc func refresh() { reload(force: true) }

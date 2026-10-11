@@ -83,6 +83,10 @@ final class Helper: NSObject, NSApplicationDelegate {
     var pending: [String] = []
     var ready = false
     var timer: Timer?
+    var operationInProgress = false
+    var progressPanel: NSPanel?
+    var progressIndicator: NSProgressIndicator?
+    var progressLabel: NSTextField?
     let previewMode: Bool
     init(preview: Bool) { previewMode = preview }
     func applicationWillFinishLaunching(_ note: Notification) {
@@ -93,7 +97,7 @@ final class Helper: NSObject, NSApplicationDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "Multi Claude profiles")
         rebuildMenu(); claim(); ready = true; processNext()
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in self?.claim(); self?.rebuildMenu() }
+        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.claim(); self?.rebuildMenu() }
         if CommandLine.arguments.count == 1 { preview() }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { preview(); return false }
@@ -118,22 +122,55 @@ final class Helper: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "About Multi Claude", action: #selector(about), keyEquivalent: "").target = self
         status.menu = menu
     }
+    func showProgress(_ message: String) {
+        if progressPanel == nil {
+            let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 360, height: 96), styleMask: [.titled, .utilityWindow], backing: .buffered, defer: false)
+            panel.title = "Multi Claude"; panel.isReleasedWhenClosed = false; panel.hidesOnDeactivate = false
+            let view = NSView(); panel.contentView = view
+            let spinner = NSProgressIndicator(); spinner.style = .spinning; spinner.controlSize = .regular; spinner.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(spinner)
+            let label = NSTextField(wrappingLabelWithString: message); label.font = .systemFont(ofSize: 13); label.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(label)
+            NSLayoutConstraint.activate([
+                spinner.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 22), spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor), spinner.widthAnchor.constraint(equalToConstant: 20), spinner.heightAnchor.constraint(equalToConstant: 20),
+                label.leadingAnchor.constraint(equalTo: spinner.trailingAnchor, constant: 14), label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20), label.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+            ])
+            progressPanel = panel; progressIndicator = spinner; progressLabel = label
+        }
+        progressLabel?.stringValue = message; progressIndicator?.startAnimation(nil)
+        NSApp.activate(ignoringOtherApps: true); progressPanel?.center(); progressPanel?.makeKeyAndOrderFront(nil)
+    }
+    func finishOperation(_ problem: String?) {
+        operationInProgress = false; progressIndicator?.stopAnimation(nil); progressPanel?.orderOut(nil)
+        if let problem { showError(problem) } else { rebuildMenu() }
+    }
     @objc func launchProfile(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? String else { return }
-        do { let c = try configuration(); try launch(c, profile(c, id)) } catch { showError(error.localizedDescription) }
+        guard !operationInProgress, let id = sender.representedObject as? String else { return }
+        do {
+            let c = try configuration(), p = try profile(c, id)
+            operationInProgress = true; showProgress("Opening \(p.name)…")
+            launchOfficial(c, p) { [weak self] problem in self?.finishOperation(problem) }
+        } catch { finishOperation(error.localizedDescription) }
     }
     @objc func addProfile() {
         let alert = NSAlert(); alert.messageText = "Add a Claude profile"; alert.informativeText = "Give this account a name. It starts with a fresh sign-in."
         let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 26)); input.placeholderString = "Work or Personal"; alert.accessoryView = input
         alert.addButton(withTitle: "Add"); alert.addButton(withTitle: "Cancel"); NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { showError("Enter an account name, then choose Add Profile again."); return }
         do {
-            let c = try configuration(); let proc = Process(); proc.executableURL = URL(fileURLWithPath: c.cliPath)
-            proc.arguments = ["--root", rootPath(), "add", "--name", input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)]
-            proc.standardOutput = FileHandle.nullDevice; let pipe = Pipe(); proc.standardError = pipe
-            try proc.run(); let data = pipe.fileHandleForReading.readDataToEndOfFile(); proc.waitUntilExit()
-            if proc.terminationStatus != 0 { showError(String(data: data, encoding: .utf8) ?? "Could not add this profile.") }; rebuildMenu()
-        } catch { showError(error.localizedDescription) }
+            let c = try configuration(); operationInProgress = true; showProgress("Creating and signing the Claude account app…")
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let proc = Process(); proc.executableURL = URL(fileURLWithPath: c.cliPath)
+                proc.arguments = ["--root", rootPath(), "add", "--name", name]
+                proc.standardOutput = FileHandle.nullDevice; let pipe = Pipe(); proc.standardError = pipe
+                var problem: String?
+                do {
+                    try proc.run(); let data = pipe.fileHandleForReading.readDataToEndOfFile(); proc.waitUntilExit()
+                    if proc.terminationStatus != 0 { problem = String(data: data, encoding: .utf8) ?? "Could not add this profile." }
+                } catch { problem = error.localizedDescription }
+                DispatchQueue.main.async { self?.finishOperation(problem) }
+            }
+        } catch { finishOperation(error.localizedDescription) }
     }
     @objc func manage() {
         guard let c = try? configuration() else { return }
