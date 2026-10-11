@@ -44,13 +44,58 @@ func managerLabel(_ text: String, size: CGFloat, weight: NSFont.Weight = .regula
     let label = NSTextField(labelWithString: text); label.font = .systemFont(ofSize: size, weight: weight); label.textColor = color
     label.lineBreakMode = .byTruncatingMiddle; label.translatesAutoresizingMaskIntoConstraints = false; return label
 }
+private func managerDynamicColor(light: NSColor, dark: NSColor) -> NSColor {
+    NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+    }
+}
+private let managerCanvasColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.965, green: 0.953, blue: 0.929, alpha: 1),
+    dark: NSColor(srgbRed: 0.105, green: 0.100, blue: 0.094, alpha: 1))
+private let managerCardColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.995, green: 0.989, blue: 0.975, alpha: 1),
+    dark: NSColor(srgbRed: 0.150, green: 0.143, blue: 0.134, alpha: 1))
+private let managerCardBorderColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.890, green: 0.860, blue: 0.817, alpha: 1),
+    dark: NSColor(srgbRed: 0.285, green: 0.265, blue: 0.242, alpha: 1))
+private let managerChipColor = managerDynamicColor(
+    light: NSColor(srgbRed: 0.936, green: 0.910, blue: 0.866, alpha: 1),
+    dark: NSColor(srgbRed: 0.210, green: 0.195, blue: 0.176, alpha: 1))
+private let managerTerracotta = NSColor(srgbRed: 0.80, green: 0.39, blue: 0.27, alpha: 1)
 func managerButton(_ title: String, target: AnyObject, action: Selector) -> NSButton {
     let button = NSButton(title: title, target: target, action: action); button.bezelStyle = .rounded
     button.translatesAutoresizingMaskIntoConstraints = false; return button
 }
+private func managerPrimaryButton(_ button: NSButton) {
+    button.bezelStyle = .rounded; button.isBordered = false; button.wantsLayer = true
+    button.layer?.backgroundColor = managerTerracotta.cgColor; button.layer?.cornerRadius = 10
+    button.contentTintColor = .white; button.font = .systemFont(ofSize: 13, weight: .semibold)
+}
+private final class ManagerStatusPill: NSView {
+    init(running: Bool) {
+        super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true; layer?.backgroundColor = (running
+            ? NSColor.systemGreen.withAlphaComponent(0.12) : managerChipColor).cgColor
+        layer?.cornerRadius = 8
+        let dot = NSView(); dot.translatesAutoresizingMaskIntoConstraints = false; dot.wantsLayer = true
+        dot.layer?.backgroundColor = (running ? NSColor.systemGreen : NSColor.secondaryLabelColor).cgColor
+        dot.layer?.cornerRadius = 3
+        let label = managerLabel(running ? "OPEN" : "READY", size: 9, weight: .bold,
+                                 color: running ? NSColor.systemGreen : .secondaryLabelColor)
+        let row = NSStackView(views: [dot, label]); row.orientation = .horizontal; row.alignment = .centerY
+        row.spacing = 5; row.translatesAutoresizingMaskIntoConstraints = false; addSubview(row)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 19),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7), row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            row.centerYAnchor.constraint(equalTo: centerYAnchor), dot.widthAnchor.constraint(equalToConstant: 6), dot.heightAnchor.constraint(equalToConstant: 6)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:)") }
+}
 final class AccountDocumentView: NSView { override var isFlipped: Bool { true } }
 final class UsageBarView: NSView {
     var percent: Double? { didSet { needsDisplay = true } }
+    var tint: NSColor = managerTerracotta { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
         let track = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
         NSColor.quaternaryLabelColor.withAlphaComponent(0.24).setFill(); track.fill()
@@ -59,26 +104,26 @@ final class UsageBarView: NSView {
         guard width > 0 else { return }
         let radius = min(bounds.height / 2, width / 2)
         let fill = NSBezierPath(roundedRect: NSRect(x: bounds.minX, y: bounds.minY, width: width, height: bounds.height), xRadius: radius, yRadius: radius)
-        (percent >= 100 ? NSColor.systemRed : NSColor.controlAccentColor).setFill(); fill.fill()
+        (percent >= 100 ? NSColor.systemRed : tint).setFill(); fill.fill()
     }
 }
 final class UsageMeterRow: NSView {
-    init(title: String, meter: UsageMeter?, message: String) {
+    init(title: String, meter: UsageMeter?, message: String, tint: NSColor) {
         super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
-        let titleLabel = managerLabel(title, size: 12, weight: .medium)
+        let titleLabel = managerLabel(title, size: 11, weight: .medium)
         let detailText = meter.flatMap { usageResetDescription($0.resetsAt) } ?? message
-        let detailLabel = managerLabel(detailText, size: 10, color: .secondaryLabelColor)
+        let detailLabel = managerLabel(detailText, size: 9, color: .secondaryLabelColor)
         let percentage = NSTextField(labelWithString: meter.map { String(format: "%.0f%% used", $0.percent) } ?? "—")
-        percentage.font = .systemFont(ofSize: 12); percentage.alignment = .right
+        percentage.font = .systemFont(ofSize: 11, weight: .medium); percentage.alignment = .right
         percentage.textColor = (meter?.percent ?? 0) >= 100 ? .systemRed : (meter == nil ? .secondaryLabelColor : .labelColor)
         percentage.translatesAutoresizingMaskIntoConstraints = false
-        let bar = UsageBarView(); bar.percent = meter?.percent; bar.translatesAutoresizingMaskIntoConstraints = false
+        let bar = UsageBarView(); bar.percent = meter?.percent; bar.tint = tint; bar.translatesAutoresizingMaskIntoConstraints = false
         bar.setAccessibilityLabel(title + ", " + (meter.map { String(format: "%.0f percent used", $0.percent) } ?? message))
         addSubview(titleLabel); addSubview(detailLabel); addSubview(bar); addSubview(percentage)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 36),
+            heightAnchor.constraint(equalToConstant: 34),
             titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor), titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            titleLabel.widthAnchor.constraint(equalToConstant: 200),
+            titleLabel.widthAnchor.constraint(equalToConstant: 176),
             detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor), detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
             detailLabel.widthAnchor.constraint(equalTo: titleLabel.widthAnchor),
             percentage.trailingAnchor.constraint(equalTo: trailingAnchor), percentage.centerYAnchor.constraint(equalTo: centerYAnchor), percentage.widthAnchor.constraint(equalToConstant: 78),
@@ -104,15 +149,16 @@ final class AccountCard: NSView {
     let profile: Profile
     init(_ p: Profile, running: Bool, needsReopen: Bool, usage: ProfileUsageSnapshot?, target: ManagerDelegate) {
         profile = p; super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true; layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor; layer?.cornerRadius = 14
-        layer?.borderWidth = 1; layer?.borderColor = (palette[p.iconColor] ?? .separatorColor).withAlphaComponent(0.35).cgColor
+        wantsLayer = true; layer?.backgroundColor = managerCardColor.cgColor; layer?.cornerRadius = 15
+        layer?.borderWidth = 1; layer?.borderColor = managerCardBorderColor.cgColor
         let header = NSView(); header.translatesAutoresizingMaskIntoConstraints = false; addSubview(header)
         let accent = NSView(); accent.wantsLayer = true; accent.layer?.backgroundColor = (palette[p.iconColor] ?? .controlAccentColor).cgColor
-        accent.layer?.cornerRadius = 3; accent.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(accent)
+        accent.layer?.cornerRadius = 2; accent.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(accent)
         let image = NSImageView(); image.image = profileImage(p, size: 40); image.translatesAutoresizingMaskIntoConstraints = false; header.addSubview(image)
-        let title = managerLabel(p.name, size: 16, weight: .semibold); header.addSubview(title)
+        let title = managerLabel(p.name, size: 15, weight: .semibold); header.addSubview(title)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let detail = managerLabel(needsReopen ? "Quit and reopen this account to apply its Dock tag" : running ? "Running · click Open to switch" : "Closed · opens a separate Claude profile", size: 12, color: .secondaryLabelColor); header.addSubview(detail)
+        let statePill = ManagerStatusPill(running: running); header.addSubview(statePill)
+        let detail = managerLabel(needsReopen ? "Reopen to apply the account Dock tag" : "Private sign-in · separate Claude profile", size: 11, color: .secondaryLabelColor); header.addSubview(detail)
         let openButton = managerButton("Open Claude", target: target, action: #selector(ManagerDelegate.openAccount(_:)))
         openButton.identifier = NSUserInterfaceItemIdentifier(p.id); header.addSubview(openButton)
         openButton.setAccessibilityLabel("Open Claude for " + p.name)
@@ -138,23 +184,24 @@ final class AccountCard: NSView {
         rowStack.translatesAutoresizingMaskIntoConstraints = false; addSubview(rowStack)
         let placeholder = usage?.message ?? "Usage is loading…"
         for (name, meter) in rows {
-            let row = UsageMeterRow(title: name, meter: meter, message: meter == nil ? placeholder : "")
+            let row = UsageMeterRow(title: name, meter: meter, message: meter == nil ? placeholder : "", tint: palette[p.iconColor] ?? managerTerracotta)
             rowStack.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: rowStack.widthAnchor).isActive = true
         }
-        let cardHeight = 10 + 52 + 8 + CGFloat(rows.count) * 36 + CGFloat(max(0, rows.count - 1)) * 2 + 10
+        let cardHeight = 10 + 52 + 10 + CGFloat(rows.count) * 34 + CGFloat(max(0, rows.count - 1)) * 3 + 10
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: cardHeight),
             header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20), header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
             header.topAnchor.constraint(equalTo: topAnchor, constant: 10), header.heightAnchor.constraint(equalToConstant: 52),
-            accent.leadingAnchor.constraint(equalTo: header.leadingAnchor), accent.centerYAnchor.constraint(equalTo: header.centerYAnchor), accent.widthAnchor.constraint(equalToConstant: 4), accent.heightAnchor.constraint(equalToConstant: 42),
+            accent.leadingAnchor.constraint(equalTo: header.leadingAnchor), accent.centerYAnchor.constraint(equalTo: header.centerYAnchor), accent.widthAnchor.constraint(equalToConstant: 3), accent.heightAnchor.constraint(equalToConstant: 38),
             image.leadingAnchor.constraint(equalTo: accent.trailingAnchor, constant: 10), image.centerYAnchor.constraint(equalTo: header.centerYAnchor), image.widthAnchor.constraint(equalToConstant: 38), image.heightAnchor.constraint(equalToConstant: 38),
-            title.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 10), title.topAnchor.constraint(equalTo: header.topAnchor, constant: 6), title.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -10),
-            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2), detail.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -10),
+            title.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 10), title.topAnchor.constraint(equalTo: header.topAnchor, constant: 5), title.trailingAnchor.constraint(equalTo: statePill.leadingAnchor, constant: -7),
+            statePill.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 7), statePill.centerYAnchor.constraint(equalTo: title.centerYAnchor), statePill.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -10),
+            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor), detail.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3), detail.trailingAnchor.constraint(lessThanOrEqualTo: openButton.leadingAnchor, constant: -10),
             more.trailingAnchor.constraint(equalTo: header.trailingAnchor), more.centerYAnchor.constraint(equalTo: header.centerYAnchor), more.widthAnchor.constraint(equalToConstant: 82),
             usageButton.trailingAnchor.constraint(equalTo: more.leadingAnchor, constant: -6), usageButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), usageButton.widthAnchor.constraint(equalToConstant: 88),
             openButton.trailingAnchor.constraint(equalTo: usageButton.leadingAnchor, constant: -6), openButton.centerYAnchor.constraint(equalTo: header.centerYAnchor), openButton.widthAnchor.constraint(equalToConstant: 102),
             rowStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28), rowStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
-            rowStack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8), rowStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
+            rowStack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10), rowStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10)
         ])
     }
     required init?(coder: NSCoder) { fatalError("init(coder:)") }
@@ -215,14 +262,22 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func buildWindow() {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 600), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Multi Claude"; window.minSize = NSSize(width: 720, height: 420); window.isReleasedWhenClosed = false; window.delegate = self
-        let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor; window.contentView = view
-        let title = managerLabel("Your Claude accounts", size: 28, weight: .bold); view.addSubview(title)
-        let subtitle = managerLabel("Separate sign-ins. Account names and colored tags.", size: 14, color: .secondaryLabelColor); view.addSubview(subtitle)
-        addButton = managerButton("+ Add Account", target: self, action: #selector(addAccount)); view.addSubview(addButton)
+        let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = managerCanvasColor.cgColor; window.contentView = view
+        let brand = NSImageView(); brand.image = iconImage("orange", size: 96); brand.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(brand)
+        let eyebrow = managerLabel("MULTI CLAUDE  /  ACCOUNT STUDIO", size: 10, weight: .bold, color: managerTerracotta)
+        eyebrow.attributedStringValue = NSAttributedString(string: "MULTI CLAUDE  /  ACCOUNT STUDIO", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .bold), .foregroundColor: managerTerracotta, .kern: 1.15
+        ]); view.addSubview(eyebrow)
+        let title = managerLabel("Your Claude studio", size: 27, weight: .bold); view.addSubview(title)
+        let subtitle = managerLabel("A clearer view of every sign-in and its usage.", size: 13, color: .secondaryLabelColor); view.addSubview(subtitle)
+        addButton = managerButton("＋  Add account", target: self, action: #selector(addAccount)); managerPrimaryButton(addButton); view.addSubview(addButton)
         modeControl = NSSegmentedControl(labels: ["Accounts", "Chooser Preview"], trackingMode: .selectOne, target: self, action: #selector(changeMode(_:)))
         modeControl.translatesAutoresizingMaskIntoConstraints = false; modeControl.selectedSegment = 0; view.addSubview(modeControl)
         modeControl.setAccessibilityLabel("Project manager view")
-        countLabel = managerLabel("", size: 12, weight: .medium, color: .secondaryLabelColor); view.addSubview(countLabel)
+        countLabel = managerLabel("", size: 11, weight: .medium, color: .secondaryLabelColor)
+        countLabel.alignment = .center; countLabel.wantsLayer = true
+        countLabel.layer?.backgroundColor = managerChipColor.cgColor; countLabel.layer?.cornerRadius = 10
+        view.addSubview(countLabel)
         restoreButton = NSPopUpButton(frame: .zero, pullsDown: true); restoreButton.translatesAutoresizingMaskIntoConstraints = false; restoreButton.bezelStyle = .rounded; view.addSubview(restoreButton)
         let scroll = NSScrollView(); scroll.drawsBackground = false; scroll.hasVerticalScroller = true; scroll.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(scroll)
         let document = AccountDocumentView(); document.translatesAutoresizingMaskIntoConstraints = false; scroll.documentView = document
@@ -231,11 +286,13 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         operationIndicator = NSProgressIndicator(); operationIndicator.style = .spinning; operationIndicator.controlSize = .small
         operationIndicator.isDisplayedWhenStopped = false; operationIndicator.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(operationIndicator)
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28), title.topAnchor.constraint(equalTo: view.topAnchor, constant: 24),
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor), subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 7),
-            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28), addButton.centerYAnchor.constraint(equalTo: title.centerYAnchor), addButton.widthAnchor.constraint(equalToConstant: 132), title.trailingAnchor.constraint(lessThanOrEqualTo: addButton.leadingAnchor, constant: -20),
-            modeControl.leadingAnchor.constraint(equalTo: title.leadingAnchor), modeControl.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 18), modeControl.widthAnchor.constraint(equalToConstant: 230),
-            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor), countLabel.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: 10),
+            brand.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 28), brand.topAnchor.constraint(equalTo: view.topAnchor, constant: 22), brand.widthAnchor.constraint(equalToConstant: 44), brand.heightAnchor.constraint(equalToConstant: 44),
+            eyebrow.leadingAnchor.constraint(equalTo: brand.trailingAnchor, constant: 12), eyebrow.topAnchor.constraint(equalTo: brand.topAnchor, constant: 1),
+            title.leadingAnchor.constraint(equalTo: eyebrow.leadingAnchor), title.topAnchor.constraint(equalTo: eyebrow.bottomAnchor, constant: 2),
+            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor), subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
+            addButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -28), addButton.centerYAnchor.constraint(equalTo: title.centerYAnchor), addButton.widthAnchor.constraint(equalToConstant: 142), addButton.heightAnchor.constraint(equalToConstant: 34), title.trailingAnchor.constraint(lessThanOrEqualTo: addButton.leadingAnchor, constant: -20),
+            modeControl.leadingAnchor.constraint(equalTo: brand.leadingAnchor), modeControl.topAnchor.constraint(equalTo: subtitle.bottomAnchor, constant: 17), modeControl.widthAnchor.constraint(equalToConstant: 230),
+            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor), countLabel.topAnchor.constraint(equalTo: modeControl.bottomAnchor, constant: 10), countLabel.widthAnchor.constraint(equalToConstant: 192), countLabel.heightAnchor.constraint(equalToConstant: 24),
             restoreButton.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), restoreButton.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
             scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor), scroll.trailingAnchor.constraint(equalTo: addButton.trailingAnchor), scroll.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 14), scroll.bottomAnchor.constraint(equalTo: status.topAnchor, constant: -18),
             document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor), document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor),
@@ -268,7 +325,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                        usage: usage[p.id], target: self)
                 stack.addArrangedSubview(card); card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             }
-            addButton.title = "+ Add Account"; addButton.action = #selector(addAccount)
+            addButton.title = "＋  Add account"; addButton.action = #selector(addAccount)
             let menu = NSMenu(); menu.addItem(withTitle: "Restore Profile", action: nil, keyEquivalent: "")
             for p in c.removedProfiles { let item = menu.addItem(withTitle: p.name, action: #selector(restoreAccount(_:)), keyEquivalent: ""); item.target = self; item.representedObject = p.id }
             restoreButton.menu = menu; restoreButton.isHidden = c.removedProfiles.isEmpty
