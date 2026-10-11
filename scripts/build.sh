@@ -7,6 +7,7 @@ mkdir -p "$task_root/build"
 xcrun swiftc -O -target "$task_arch-apple-macosx13.0" \
   "$task_root/native/macos/Models.swift" \
   "$task_root/native/macos/Icons.swift" \
+  "$task_root/native/macos/NativeCopies.swift" \
   "$task_root/native/macos/CLI.swift" \
   "$task_root/native/macos/Helper.swift" \
   "$task_root/native/macos/Manager.swift" \

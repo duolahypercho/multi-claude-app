@@ -1,18 +1,17 @@
-# Verification — 2026-10-11
+# Verification — 2026-10-12
 
 Environment: Apple silicon macOS, official Claude Desktop 2.31226.1.
 
-- Native Swift release build and Intel cross-compilation succeeded. Generated executables and app bundles are locally ad-hoc signed.
-- Twelve management tests passed in disposable roots without changing login handlers or LaunchAgents: repeat setup, email labels and SVG tags, old-config migration, login-mode validation, manager/app collision handling, rename/recolor, remove/restore, stable IDs, data preservation, malformed links, damaged config, and redirected data paths.
-- Installed the native Multi Claude manager, persistent Primary/Secondary Dock launchers, and menu helper. Updated the installation while preserving both original Claude main process IDs and account data.
-- Inspected the manager visually and through accessibility. The account cards show the Claude vector mark and distinct P1/S2 right-side tags. Verified the Add Account form and canceled it; verified the name/email editor by saving Secondary's existing label. Its launcher restarted while its Claude process stayed running.
-- Primary remains the original Claude process. Secondary uses its separate managed desktop directory. Repeated launches focus the intended process.
-- `lsof` confirmed Secondary browser storage used its managed folder; no Primary cookie, config, or LevelDB lock files were open in Secondary.
-- Direct delivery of a harmless Claude settings deep link to Secondary succeeded through a targeted open-URL Apple Event.
-- Doctor verified the official Claude app signature and both configured login handlers. Native mode leaves handlers with Claude; chooser mode registers Multi Claude. Returned the local installation to native mode.
-- The native chooser was inspected visually and through accessibility: running profiles have distinct icons, nothing is preselected, and Done stays disabled until a profile is selected.
-- Shell syntax checks and `git diff --check` passed.
+- Native Swift release build succeeded. Fifteen disposable-root tests cover profile management, ten distinct app identities, source-bundle preservation, repeat setup without replacing current apps, name/email labels and SVG tags, data preservation, malformed links, old-config migration, and login modes.
+- The native startup fixture confirms that the bootstrap becomes the target executable with the **same PID**. Each account receives its exact data path, account-specific Code configuration, and cleared inherited overrides. Primary receives its explicit original data path. The fixture does not read real account storage.
+- A real Claude copy was installed in a separate verification root and opened through the normal application launch path. Process inspection confirmed one native Claude main process in the account bundle and its isolated `--user-data-dir`. Native helper processes had accessory activation policies. No persistent launcher remained.
+- Read the running process icon through `NSRunningApplication.icon`: it showed the Claude mark with the right-side S2 tag. Its macOS application name was Claude Secondary. Inspected the native window through accessibility: it reached Claude’s Get started sign-in screen.
+- Verified that rename/recolor, remove, and uninstall refuse to mutate a running native account app and leave configuration intact. Repeating setup kept the current live bundle in place.
+- Doctor verified the original official signature and both native-copy signatures with deep, strict checks. The bundled Squirrel installer is made non-executable in copies, with automatic updates disabled in their startup environment. Updating copies is handled by setup from the official app.
+- Installed the updated manager, account copies, and menu helper without terminating the existing original Claude instances. Existing windows require quitting and reopening from Multi Claude to use tagged native copies; the manager shows this migration reminder.
+- Previous targeted delivery of a harmless settings deep link to the isolated original Secondary instance succeeded through an open-URL Apple Event. Previous chooser inspection confirmed explicit account selection with no default and closed profiles disabled. Callback delivery to locally signed account copies still needs authenticated validation.
+- Shell syntax checks and whitespace validation are included in the final verification. CI also cross-compiles the other Mac architecture.
 
-Sign-in investigation found that this installed Claude build changes its native auth behavior when it is not the default protocol handler. Claude logs showed that branch during the user's attempts. Native mode and the Retry Native Sign-in action avoid that protocol ownership conflict; chooser mode remains available for browser callbacks that reach the wrong instance.
+The native-copy approach changes the local signing identity. It does not preserve Anthropic’s restricted Keychain groups. Existing Keychain permissions, enterprise/MSAL sign-in, passkeys, and services that validate the vendor signature may require the official app. No account credentials are copied between profiles. The original Claude app remains unchanged.
 
-This does **not** establish the precise cause of the user's reported sign-in failure or verify a completed second-account session. Actual second-account authentication, connector OAuth, enterprise/MSAL completion, and all Code/Cowork features require user sign-in and remain unverified. The installed Claude build disables local pairing for relocated data folders; the tool preserves that restriction. Intel runtime behavior is unverified.
+A completed second-account session, connector OAuth, and full Code/Cowork behavior remain **unverified**. Reaching the native sign-in screen and passing management tests do not establish successful authentication. The installed Claude build disables local pairing for relocated data folders; that restriction is preserved. Intel runtime behavior is unverified. The PR remains a draft until authenticated account behavior is checked.

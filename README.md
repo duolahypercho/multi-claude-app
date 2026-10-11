@@ -1,8 +1,10 @@
 # Multi Claude App
 
-A native macOS account manager for the official Claude desktop app. Open multiple profiles, sign in separately, and recognize each one by its account name or email and a **Claude icon with a small colored tag on the right**.
+A native macOS account manager with **one Claude app per account**, each with its own account name/email label and **Claude icon with a small colored tag on the right**. The account app is the actual native Claude process; no second launcher stays running. The manager and menu helper have no Dock icons.
 
-Primary uses your existing Claude profile. Extra accounts get fresh desktop storage. The original signed Claude app remains unchanged.
+Primary uses your existing Claude profile. Extra accounts get fresh desktop storage. Account apps are local copies of your installed Claude app and are locally ad-hoc signed. The original signed Claude app remains unchanged.
+
+Native chat reaches the sign-in screen in local testing. Completed account sign-in, enterprise/MSAL authentication, passkeys, and Code/Cowork compatibility remain unverified. Local copies cannot claim Anthropic’s signing identity or restricted Keychain groups. macOS may ask for Keychain access or other permissions again. Keep the official app available for features that require its identity.
 
 Inspired by [am-will/multi-codex-app](https://github.com/am-will/multi-codex-app). Built in Swift/AppKit, with no third-party runtime dependencies.
 
@@ -11,13 +13,17 @@ Inspired by [am-will/multi-codex-app](https://github.com/am-will/multi-codex-app
 1. Open **Multi Claude.app** in your personal Applications folder: Finder → Go → Home → Applications.
 2. Click **Open Claude** on Primary or Secondary. Sign in separately in the intended Claude window.
 3. Click **Add Account** for more profiles. Enter an account name or email and choose a tag color.
-4. On an account card, use **Manage → Rename / Set Email Label** or **Icon Color** to change its identity.
+4. On an account card, use **Manage → Rename / Set Email Label** or **Tag Color** to change its identity.
 
-Each running account keeps a separate colored launcher in the Dock. Its short tag combines the first character of your label with its profile number, such as **P1**, **S2**, or **W3**. Hover over the Dock icon to see the full account label. Click it to bring that profile's Claude windows forward. Drag the launcher into the Dock to keep it there when closed.
+Only the native account apps appear in the Dock. A small startup executable replaces itself with the Claude executable in the same app bundle, keeping the same process ID. There is no persistent proxy launcher.
 
-Labels are yours to set; they do not read or change the authenticated email. Claude windows still belong to the original Claude application, so macOS may also show its standard Dock icon. The colored icons are persistent account launchers. Quitting a launcher leaves its Claude process running; quitting Claude makes its launcher exit.
+When upgrading from the old launcher version, existing Claude windows stay open. **Quit each account with Command-Q and reopen it from Multi Claude when ready** to apply its tagged Dock icon. The manager shows a reminder on accounts still running from the original app. Wait for any active work to finish before quitting.
 
-The stack icon in the menu bar also opens profiles and the manager. Double-click **Start Claude Profiles.command** in the project folder to build/install on first use and open the manager.
+Use the **stack icon in the menu bar → Profile Management** to open the account switcher. It shows the full account name/email and a colored tag, such as **P1**, **S2**, or **W3**. Click **Open Claude** to switch to that account. You can also open Multi Claude from Finder; its window appears without a Dock icon.
+
+Labels are yours to set; they do not read or change the authenticated email. Native Claude windows run inside each account app. The same tagged icon identifies the account in the Dock, Finder, manager, and menu bar. Double-clicking an account app selects its saved profile without needing Terminal arguments.
+
+Double-click **Start Claude Profiles.command** in the project folder to build/install on first use and open the manager.
 
 ## Install from source
 
@@ -33,15 +39,15 @@ The build also creates `build/Multi Claude.app`. It has a native first-run setup
 
 ## Sign-in troubleshooting
 
-The default mode is **Claude Native Sign-in**. Claude keeps ownership of its authentication links. This avoids changing its native authentication behavior merely because a profile router is installed.
+The default mode is **Claude Native Sign-in**. Opening or focusing an account through Multi Claude assigns its authentication links to that native account app. Existing windows from the official app keep the official handler. This lets the intended app handle its native sign-in flow.
 
-If sign-in stalls, choose **Manage → Retry Native Sign-in** on the intended account. This restores Claude's native link handlers and opens that profile. Cancel the old sign-in attempt, then retry using Claude's sign-in button. Choose the intended account in the browser or authentication sheet.
+If sign-in stalls, choose **Manage → Retry Native Sign-in** on the intended account. This selects native link handling and opens/focuses that profile. Cancel the old sign-in attempt, then retry using Claude's sign-in button. Choose the intended account in the browser or authentication sheet.
 
 If a browser callback opens Primary or another profile, choose **File → Login Links → Choose Profile for Browser Callbacks**, then restart sign-in. A chooser appears for incoming links: select the **running profile where you began sign-in**, then Continue. Nothing is preselected. Closed profiles are disabled. Cancel discards the link; restart sign-in to get a fresh one.
 
 Some native authentication sessions return directly to their originating window, without a chooser. The browser's account session is shared, so select the correct account there too. Switching modes does not clear profile data or sign anyone out. The mode applies to this macOS user's Claude links, not just one profile.
 
-Real second-account, enterprise, and connector OAuth completion still needs verification by the user. These controls address protocol ownership conflicts; they cannot resolve service-side account errors, expired login links, or network problems.
+Real second-account, enterprise, and connector OAuth completion still needs verification by the user. The locally signed copies also have different identities from the official app. These controls address protocol ownership conflicts; they cannot resolve service-side account errors, expired login links, or network problems.
 
 ## Ten accounts
 
@@ -51,7 +57,7 @@ Use **Add Account** eight more times after the initial two profiles, or run:
 ~/.local/bin/multi-claude-app setup --count 10
 ```
 
-Sign in to each account separately. Keep unused profiles closed to save memory and CPU. There are five tag colors; profile numbers keep tags distinct when colors repeat. Up to 100 active profiles are supported.
+Sign in to each account separately. Keep unused profiles closed to save memory and CPU. There are five tag colors; profile numbers keep tags distinct when colors repeat. Up to 100 active profiles are supported. App copies share unchanged file blocks on APFS. On other filesystems each copy uses roughly the installed Claude app’s full size, in addition to separate account storage.
 
 ## Optional CLI
 
@@ -71,7 +77,7 @@ multi-claude-app login-routing chooser
 multi-claude-app doctor
 ```
 
-Colors: orange, blue, purple, teal, yellow. Names/colors can change without changing data folders. Numbers are never reused. `setup --count N` only grows the active count. Remove/restore changes launchers and preserves account data; an open Claude window stays open when its launcher is removed.
+Colors: orange, blue, purple, teal, yellow. Names/colors can change without changing data folders. Numbers are never reused. `setup --count N` only grows the active count. Quit an account before renaming, recoloring, removing, or rebuilding its native app. Remove/restore changes apps and preserves account data. Commands refuse to replace or delete an app while its native Claude process is running.
 
 ## How it works
 
@@ -80,11 +86,11 @@ Colors: orange, blue, purple, teal, yellow. Names/colors can change without chan
 | Primary | Existing `~/Library/Application Support/Claude` | Existing default |
 | Extra profiles | `~/Library/Application Support/Multi Claude/profiles/ID/desktop` | `…/profiles/ID/claude-code` |
 
-A small persistent launcher starts the original signed Claude app with Chromium's `--user-data-dir` flag. Extra profiles also receive `CLAUDE_CONFIG_DIR` for child tools that honor it. No existing credentials are copied. Usage and billing stay attached to each account.
+Setup makes a local native copy per account, preserving Electron’s helper naming while assigning a distinct bundle ID, display name, and SVG-derived icon. A bootstrap uses `execv` to become the copied Claude executable and passes Chromium’s `--user-data-dir` flag, including an explicit original data path for Primary. Extra profiles also receive `CLAUDE_CONFIG_DIR` for child tools that honor it. No existing credentials are copied between accounts. Usage and billing stay attached to each account.
 
-In chooser mode, a native menu helper owns the `claude://` and installed Microsoft authentication schemes. It sends incoming links directly to the selected Claude process through a macOS open-URL Apple Event. Links stay in memory and are never stored in logs, files, or process arguments. The helper refreshes ownership every five seconds in chooser mode. In native mode, it leaves link ownership with Claude.
+In chooser mode, a native menu helper owns the `claude://` and installed Microsoft authentication schemes. It sends incoming links directly to the selected Claude process through a macOS open-URL Apple Event. Links stay in memory and are never stored in logs, files, or process arguments. The helper refreshes ownership every five seconds in chooser mode. In native mode, opening an account selects that account’s native handler.
 
-Editable SVG icons and macOS `.icns` icons are generated inside each launcher’s `Contents/Resources` folder. The vector Claude mark is in [assets/claude-mark.svg](assets/claude-mark.svg).
+Editable SVG icons and macOS `.icns` icons are generated inside each native account app’s `Contents/Resources` folder. The vector Claude mark is in [assets/claude-mark.svg](assets/claude-mark.svg).
 
 ### Compatibility limits
 
@@ -96,13 +102,15 @@ Editable SVG icons and macOS `.icns` icons are generated inside each launcher’
 
 ## Update and uninstall
 
-Update Claude normally. Use **File → Check Setup** afterward. Rebuild and run `sh install.sh` to update this manager; setup preserves account data and replaces its own apps.
+Update **the official Claude app** normally. Quit the native account copies, then run `multi-claude-app setup` to refresh them from the updated official app. **Use the official app for updates, not the account copies’ in-app updater.** Copies set `DISABLE_AUTOUPDATER=1` and make their bundled Squirrel installer non-executable so an update cannot discard the profile bootstrap. Setup checks the source version/signature identity and bootstrap digest, and keeps current copies in place.
+
+Rebuild and run `sh install.sh` to update this manager. Setup preserves account data. Migrating from old launchers stops those wrapper processes without quitting the real Claude windows. Once native copies are running, updates require quitting the accounts that need rebuilding.
 
 ```sh
 multi-claude-app uninstall
 ```
 
-Uninstall removes the manager, launchers, menu helper, and LaunchAgent. It restores prior login handlers when the helper still owns them. Account data, configuration, and the CLI are retained. Run `setup` to reinstall.
+Quit the native account apps before uninstalling. Uninstall removes the manager, local account copies, menu helper, and LaunchAgent. It restores prior login handlers when a managed app or helper owns them. Account data, configuration, and the CLI are retained. Run `setup` to reinstall.
 
 Configuration: `~/Library/Application Support/Multi Claude/config.json`. Profile folders are mode 700; config is mode 600. Use one integrated installation per macOS user and keep its root in a permanent location.
 

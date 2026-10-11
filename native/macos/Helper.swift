@@ -142,8 +142,8 @@ final class Helper: NSObject, NSApplicationDelegate {
         else { showError("Re-run setup to install the Multi Claude account manager.") }
     }
     @objc func about() {
-        let a = NSAlert(); a.messageText = "Multi Claude App 1.1"
-        a.informativeText = "Independent Claude desktop profiles, account labels, and Dock icons.\n\nInspired by am-will/multi-codex-app (MIT).\nThe official Claude app is unchanged.\n\nUse Multi Claude to manage accounts and sign-in modes."
+        let a = NSAlert(); a.messageText = "Multi Claude App 1.3"
+        a.informativeText = "Independent Claude desktop profiles, account labels, and colored tags.\n\nInspired by am-will/multi-codex-app (MIT).\nThe official Claude app is unchanged.\n\nUse Multi Claude to manage accounts and sign-in modes."
         a.runModal()
     }
     @objc func preview() {

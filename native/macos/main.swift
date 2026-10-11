@@ -11,7 +11,9 @@ do {
         rootURL = URL(fileURLWithPath: args[1], isDirectory: true).standardizedFileURL; args.removeFirst(2)
     }
     if let id = Bundle.main.object(forInfoDictionaryKey: "MultiClaudeProfileID") as? String {
-        startProfileLauncher(id)
+        if Bundle.main.object(forInfoDictionaryKey: "MultiClaudeNative") as? Bool == true {
+            do { try execNativeProfile(id) } catch { showError(error.localizedDescription); exit(1) }
+        } else { startProfileLauncher(id) }
     } else if Bundle.main.object(forInfoDictionaryKey: "MultiClaudeManager") as? Bool == true && args.isEmpty {
         startManager()
     } else {

@@ -18,8 +18,8 @@ func packageManager(source: String, destination: String, root: String?) throws {
     try makeDirectory(destination + "/Contents/Resources", mode: 0o755)
     try fm.copyItem(atPath: source, toPath: destination + "/Contents/MacOS/MultiClaude")
     var info: [String: Any] = ["CFBundleIdentifier": managerID, "CFBundleExecutable": "MultiClaude", "CFBundleName": "Multi Claude",
-        "CFBundleDisplayName": "Multi Claude", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "2",
-        "CFBundleIconFile": "ProfileIcon.icns", "LSMinimumSystemVersion": "13.0", "NSHighResolutionCapable": true, "MultiClaudeManager": true]
+        "CFBundleDisplayName": "Multi Claude", "CFBundlePackageType": "APPL", "CFBundleShortVersionString": releaseVersion, "CFBundleVersion": "4",
+        "CFBundleIconFile": "ProfileIcon.icns", "LSMinimumSystemVersion": "13.0", "NSHighResolutionCapable": true, "MultiClaudeManager": true, "LSUIElement": true]
     if let root { info["MultiClaudeRoot"] = root }
     try writePlist(info, destination + "/Contents/Info.plist")
     try renderProfileIcon("teal", destination + "/Contents/Resources/ProfileIcon.icns", tag: "M")
@@ -51,7 +51,7 @@ func managerButton(_ title: String, target: AnyObject, action: Selector) -> NSBu
 final class AccountDocumentView: NSView { override var isFlipped: Bool { true } }
 final class AccountCard: NSView {
     let profile: Profile
-    init(_ p: Profile, running: Bool, target: ManagerDelegate) {
+    init(_ p: Profile, running: Bool, needsReopen: Bool, target: ManagerDelegate) {
         profile = p; super.init(frame: .zero); translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true; layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor; layer?.cornerRadius = 14
         layer?.borderWidth = 1; layer?.borderColor = (palette[p.iconColor] ?? .separatorColor).withAlphaComponent(0.35).cgColor
@@ -60,7 +60,7 @@ final class AccountCard: NSView {
         let image = NSImageView(); image.image = profileImage(p, size: 48); image.translatesAutoresizingMaskIntoConstraints = false; addSubview(image)
         let title = managerLabel(p.name, size: 18, weight: .semibold); addSubview(title)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let detail = managerLabel(running ? "Running · click Open to switch" : "Closed · opens a separate Claude profile", size: 12, color: .secondaryLabelColor); addSubview(detail)
+        let detail = managerLabel(needsReopen ? "Quit and reopen this account to apply its Dock tag" : running ? "Running · click Open to switch" : "Closed · opens a separate Claude profile", size: 12, color: .secondaryLabelColor); addSubview(detail)
         let state = managerLabel(running ? "● Running" : "○ Closed", size: 11, weight: .medium, color: running ? .systemGreen : .secondaryLabelColor); addSubview(state)
         let openButton = managerButton("Open Claude", target: target, action: #selector(ManagerDelegate.openAccount(_:)))
         openButton.identifier = NSUserInterfaceItemIdentifier(p.id); addSubview(openButton)
@@ -74,7 +74,7 @@ final class AccountCard: NSView {
             item.target = target; item.representedObject = [p.id, color]; item.state = color == p.iconColor ? .on : .off
             item.image = iconImage(color, size: 32, tag: ""); item.image?.size = NSSize(width: 16, height: 16)
         }
-        let colorItem = menu.addItem(withTitle: "Icon Color", action: nil, keyEquivalent: ""); colorItem.submenu = colors
+        let colorItem = menu.addItem(withTitle: "Tag Color", action: nil, keyEquivalent: ""); colorItem.submenu = colors
         menu.addItem(.separator())
         let remove = menu.addItem(withTitle: "Remove Profile…", action: #selector(ManagerDelegate.removeAccount(_:)), keyEquivalent: ""); remove.target = target; remove.representedObject = p.id
         more.menu = menu; more.setAccessibilityLabel("Manage " + p.name); addSubview(more)
@@ -117,7 +117,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fileMenu.addItem(withTitle: "Add Account…", action: #selector(addAccount), keyEquivalent: "n").target = self
         fileMenu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r").target = self
         fileMenu.addItem(withTitle: "Check Setup…", action: #selector(checkSetup), keyEquivalent: "").target = self
-        fileMenu.addItem(withTitle: "Show App Launchers", action: #selector(showLaunchers), keyEquivalent: "").target = self
+        fileMenu.addItem(withTitle: "Show Account Apps", action: #selector(showLaunchers), keyEquivalent: "").target = self
         let routing = NSMenu(); let routingItem = fileMenu.addItem(withTitle: "Login Links", action: nil, keyEquivalent: "")
         for (title, mode) in [("Claude Native Sign-in", "native"), ("Choose Profile for Browser Callbacks", "chooser")] {
             let item = routing.addItem(withTitle: title, action: #selector(changeLoginMode(_:)), keyEquivalent: ""); item.target = self; item.representedObject = mode
@@ -136,7 +136,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.title = "Multi Claude"; window.minSize = NSSize(width: 720, height: 420); window.isReleasedWhenClosed = false; window.delegate = self
         let view = NSView(); view.wantsLayer = true; view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor; window.contentView = view
         let title = managerLabel("Your Claude accounts", size: 28, weight: .bold); view.addSubview(title)
-        let subtitle = managerLabel("Separate sign-ins. Your own names and Dock colors.", size: 14, color: .secondaryLabelColor); view.addSubview(subtitle)
+        let subtitle = managerLabel("Separate sign-ins. Account names and colored tags.", size: 14, color: .secondaryLabelColor); view.addSubview(subtitle)
         addButton = managerButton("+ Add Account", target: self, action: #selector(addAccount)); view.addSubview(addButton)
         countLabel = managerLabel("", size: 12, weight: .medium, color: .secondaryLabelColor); view.addSubview(countLabel)
         restoreButton = NSPopUpButton(frame: .zero, pullsDown: true); restoreButton.translatesAutoresizingMaskIntoConstraints = false; restoreButton.bezelStyle = .rounded; view.addSubview(restoreButton)
@@ -164,7 +164,11 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let state = c.profiles.map { "\($0.id):\($0.name):\($0.iconColor):\(running[$0.id]?.processIdentifier ?? 0)" }.joined(separator: "|") + c.removedProfiles.map(\.id).joined(separator: ",") + (c.loginRoutingMode ?? "native")
             guard force || state != lastState else { return }; lastState = state
             clearCards(); countLabel.stringValue = "\(c.profiles.count) accounts · \(running.filter { key, _ in c.profiles.contains(where: { $0.id == key }) }.count) running"
-            for p in c.profiles { let card = AccountCard(p, running: running[p.id] != nil, target: self); stack.addArrangedSubview(card); card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+            for p in c.profiles {
+                let legacy = running[p.id]?.bundleURL?.standardizedFileURL.path == c.appPath
+                let card = AccountCard(p, running: running[p.id] != nil, needsReopen: legacy, target: self)
+                stack.addArrangedSubview(card); card.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            }
             addButton.title = "+ Add Account"; addButton.action = #selector(addAccount)
             let menu = NSMenu(); menu.addItem(withTitle: "Restore Profile", action: nil, keyEquivalent: "")
             for p in c.removedProfiles { let item = menu.addItem(withTitle: p.name, action: #selector(restoreAccount(_:)), keyEquivalent: ""); item.target = self; item.representedObject = p.id }
@@ -179,7 +183,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func showWelcome() {
         guard lastState != "welcome" else { return }; lastState = "welcome"; clearCards(); restoreButton.isHidden = true
         countLabel.stringValue = "Get started with two profiles"
-        let text = NSTextField(wrappingLabelWithString: "Keep your existing Claude account as Primary, then add a fresh Secondary account. Give every account a name or email label and a different colored app icon.")
+        let text = NSTextField(wrappingLabelWithString: "Keep your existing Claude account as Primary, then add a fresh Secondary account. Each account gets a native Claude copy with its own name and tagged Dock icon. These copies use local signatures; enterprise sign-in, passkeys, and Code/Cowork may need the official app.")
         text.font = .systemFont(ofSize: 18); text.textColor = .secondaryLabelColor; text.translatesAutoresizingMaskIntoConstraints = false
         stack.addArrangedSubview(text); text.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         addButton.title = "Set Up Accounts"; addButton.action = #selector(setupAccounts); status.stringValue = "Uses the official Claude desktop app installed on this Mac."
@@ -231,7 +235,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func renameAccount(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
-        let alert = NSAlert(); alert.messageText = "Name this account"; alert.informativeText = "Use an account name or email so you can recognize its app icon. This changes the label, not the sign-in."
+        let alert = NSAlert(); alert.messageText = "Name this account"; alert.informativeText = "Use an account name or email so you can recognize it in the account list. This changes the label, not the sign-in."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 350, height: 26)); field.stringValue = p.name; alert.accessoryView = field
         alert.addButton(withTitle: "Save Name"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
@@ -239,7 +243,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func changeColor(_ sender: NSMenuItem) {
         guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
-        execute(["icon", pair[0], pair[1]], message: "Updating the app icon…")
+        execute(["icon", pair[0], pair[1]], message: "Updating the account tag…")
     }
     @objc func changeLoginMode(_ sender: NSMenuItem) {
         guard let mode = sender.representedObject as? String else { return }
@@ -258,7 +262,7 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func removeAccount(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String, let c = try? configuration(), let p = try? profile(c, id) else { return }
-        let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "Its launcher is removed. All account data is kept, and you can restore this profile later. Its open Claude window stays open."
+        let alert = NSAlert(); alert.messageText = "Remove \(p.name)?"; alert.informativeText = "Quit this account with Command-Q first. Its app will be removed, with all account data kept so you can restore it later."
         alert.addButton(withTitle: "Remove Profile"); alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         execute(["remove", id], message: "Removing the launcher and keeping its data…")
@@ -267,10 +271,10 @@ final class ManagerDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc func refresh() { reload(force: true) }
     @objc func showLaunchers() { if let c = try? configuration() { NSWorkspace.shared.open(URL(fileURLWithPath: c.applicationsDir)) } }
     @objc func checkSetup() { execute(["doctor"], message: "Checking your installation…") { showError("Your profile folders, app launchers, and enabled login routing passed their checks.") } }
-    @objc func about() { showError("Multi Claude 1.1\n\nSeparate Claude profiles with account labels and colored Dock launchers. The official Claude desktop app is unchanged.\n\nInspired by am-will/multi-codex-app (MIT).") }
+    @objc func about() { showError("Multi Claude 1.3\n\nOne native Claude app and tagged Dock icon per account. The startup bootstrap becomes the Claude process. The manager and menu helper have no Dock icons.\n\nAccount copies are locally signed. Enterprise sign-in, passkeys, and Code/Cowork compatibility remain unverified.\n\nInspired by am-will/multi-codex-app (MIT).") }
 }
 var managerDelegate: ManagerDelegate?
 func startManager() {
-    let app = NSApplication.shared; app.setActivationPolicy(.regular)
+    let app = NSApplication.shared; app.setActivationPolicy(.accessory)
     managerDelegate = ManagerDelegate(); app.delegate = managerDelegate; app.run()
 }
