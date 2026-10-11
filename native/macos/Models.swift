@@ -5,6 +5,8 @@ import Darwin
 let helperID = "local.multi-claude-app"
 let managerProfilesDidChangeNotification = Notification.Name(helperID + ".manager-profiles-changed")
 let helperProfilesDidChangeNotification = Notification.Name(helperID + ".helper-profiles-changed")
+let usageDidRefreshNotification = Notification.Name(helperID + ".usage-did-refresh")
+let managerRequestsUsageRefreshNotification = Notification.Name(helperID + ".refresh-usage")
 let helperRequestsChooserPreviewNotification = Notification.Name(helperID + ".show-chooser-preview")
 let managerOpenedChooserPreviewNotification = Notification.Name(helperID + ".chooser-preview-opened")
 let claudeID = "com.anthropic.claudefordesktop"

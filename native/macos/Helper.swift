@@ -89,6 +89,7 @@ final class Helper: NSObject, NSApplicationDelegate {
     var progressIndicator: NSProgressIndicator?
     var progressLabel: NSTextField?
     var managerPreviewRequestPending = false
+    var usageTimer: Timer?
     let previewMode: Bool
     init(preview: Bool) { previewMode = preview }
     func applicationWillFinishLaunching(_ note: Notification) {
@@ -98,13 +99,25 @@ final class Helper: NSObject, NSApplicationDelegate {
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(managerOpenedChooserPreview(_:)), name: managerOpenedChooserPreviewNotification, object: nil)
         if previewMode { ready = true; preview(); return }
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(managerProfilesDidChange(_:)), name: managerProfilesDidChangeNotification, object: nil)
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(managerRequestsUsageRefresh(_:)), name: managerRequestsUsageRefreshNotification, object: nil)
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "Multi Claude profiles")
         rebuildMenu(); claim(); ready = true; processNext()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.claim(); self?.rebuildMenu() }
+        usageTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in
+            guard let c = try? configuration() else { return }; UsageRefresher.shared.refresh(c.profiles)
+        }
+        if let c = try? configuration() { UsageRefresher.shared.refresh(c.profiles) }
         if CommandLine.arguments.count == 1 { preview() }
     }
-    @objc func managerProfilesDidChange(_ note: Notification) { claim(); rebuildMenu() }
+    @objc func managerProfilesDidChange(_ note: Notification) {
+        claim(); rebuildMenu()
+        if let c = try? configuration() { UsageRefresher.shared.refresh(c.profiles) }
+    }
+    @objc func managerRequestsUsageRefresh(_ note: Notification) {
+        guard let c = try? configuration() else { return }
+        UsageRefresher.shared.refresh(c.profiles, force: true)
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { preview(); return false }
     func claim() {
         guard let c = try? configuration(), c.integrationEnabled && c.usesLoginChooser else { return }
@@ -122,10 +135,19 @@ final class Helper: NSObject, NSApplicationDelegate {
             menu.addItem(.separator())
             let usageHeading = menu.addItem(withTitle: "5-hour + Weekly Usage", action: nil, keyEquivalent: "")
             usageHeading.isEnabled = false
+            let usage = UsageCacheFile.load().profiles
             for p in c.profiles {
-                let item = menu.addItem(withTitle: p.displayName, action: #selector(openUsage(_:)), keyEquivalent: "")
+                let text: String
+                if let snapshot = usage[p.id], let five = snapshot.fiveHour, let week = snapshot.weekly {
+                    text = String(format: "%@    5h %.0f%%  ·  Week %.0f%%", p.displayName, five.percent, week.percent)
+                } else {
+                    text = p.displayName + "    " + (usage[p.id]?.message ?? "Usage loading…")
+                }
+                let item = menu.addItem(withTitle: text, action: #selector(openUsage(_:)), keyEquivalent: "")
                 item.representedObject = p.id; item.target = self; item.image = profileImage(p, size: 20)
+                item.toolTip = usage[p.id]?.message ?? "Open the official Usage page for \(p.name)."
             }
+            menu.addItem(withTitle: "Refresh Usage", action: #selector(refreshUsage), keyEquivalent: "").target = self
         }
         menu.addItem(.separator())
         menu.addItem(withTitle: "Add Profile…", action: #selector(addProfile), keyEquivalent: "").target = self
@@ -133,6 +155,9 @@ final class Helper: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Profile Management…", action: #selector(manage), keyEquivalent: "").target = self
         menu.addItem(withTitle: "About Multi Claude", action: #selector(about), keyEquivalent: "").target = self
         status.menu = menu
+    }
+    @objc func refreshUsage() {
+        if let c = try? configuration() { UsageRefresher.shared.refresh(c.profiles, force: true) }
     }
     func showProgress(_ message: String) {
         if progressPanel == nil {
@@ -156,6 +181,7 @@ final class Helper: NSObject, NSApplicationDelegate {
         else {
             rebuildMenu()
             DistributedNotificationCenter.default().post(name: helperProfilesDidChangeNotification, object: nil)
+            if let c = try? configuration() { UsageRefresher.shared.refresh(c.profiles) }
         }
     }
     @objc func launchProfile(_ sender: NSMenuItem) {
