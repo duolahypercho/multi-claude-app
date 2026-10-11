@@ -98,7 +98,7 @@ final class Helper: NSObject, NSApplicationDelegate {
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { preview(); return false }
     func claim() {
-        guard let c = try? configuration(), c.integrationEnabled else { return }
+        guard let c = try? configuration(), c.integrationEnabled && c.usesLoginChooser else { return }
         for scheme in c.schemes where handler(scheme) != helperID { try? setHandler(scheme, helperID) }
     }
     func rebuildMenu() {
@@ -136,14 +136,14 @@ final class Helper: NSObject, NSApplicationDelegate {
         } catch { showError(error.localizedDescription) }
     }
     @objc func manage() {
-        let a = NSAlert(); a.messageText = "Manage Claude profiles"
-        a.informativeText = "Run this in Terminal for guided management:\n\n~/.local/bin/multi-claude-app wizard\n\nRename, recolor, add, remove, or restore a profile. Removed profiles keep their data."
-        a.addButton(withTitle: "OK"); a.addButton(withTitle: "Open Profile Folder"); NSApp.activate(ignoringOtherApps: true)
-        if a.runModal() == .alertSecondButtonReturn, let c = try? configuration() { NSWorkspace.shared.open(URL(fileURLWithPath: c.applicationsDir)) }
+        guard let c = try? configuration() else { return }
+        let path = c.managerPath ?? c.applicationsDir + "/Multi Claude.app"
+        if fm.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+        else { showError("Re-run setup to install the Multi Claude account manager.") }
     }
     @objc func about() {
-        let a = NSAlert(); a.messageText = "Multi Claude App 1.0"
-        a.informativeText = "Independent Claude desktop profiles and explicit login-link routing.\n\nInspired by am-will/multi-codex-app (MIT).\nThe official Claude app is unchanged.\n\nManage: multi-claude-app wizard\nRemove integration: multi-claude-app uninstall"
+        let a = NSAlert(); a.messageText = "Multi Claude App 1.1"
+        a.informativeText = "Independent Claude desktop profiles, account labels, and Dock icons.\n\nInspired by am-will/multi-codex-app (MIT).\nThe official Claude app is unchanged.\n\nUse Multi Claude to manage accounts and sign-in modes."
         a.runModal()
     }
     @objc func preview() {
@@ -160,7 +160,7 @@ final class Helper: NSObject, NSApplicationDelegate {
     }
     func processNext() {
         guard ready, chooser == nil, !pending.isEmpty else { return }
-        guard let c = try? configuration(), c.integrationEnabled else { pending.removeAll(); return }
+        guard let c = try? configuration(), c.integrationEnabled && c.usesLoginChooser else { pending.removeAll(); return }
         let raw = pending.removeFirst(); let choice = Chooser(); chooser = choice
         // Every link needs an explicit destination; nothing falls back to Primary.
         choice.show(c, preview: false) { [weak self] selected in

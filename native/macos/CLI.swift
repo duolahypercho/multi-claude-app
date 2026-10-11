@@ -25,6 +25,8 @@ func preflight(_ c: Configuration) throws {
     }
     let helper = rootPath() + "/Multi Claude Helper.app"
     if fm.fileExists(atPath: helper) && !ownsBundle(helper) { throw fail("An unrelated app exists at \(helper).") }
+    let manager = c.applicationsDir + "/Multi Claude.app"
+    if fm.fileExists(atPath: manager) && !ownsManager(manager) { throw fail("An unrelated app exists at \(manager).") }
     let cli = rootPath() + "/bin/multi-claude-app"
     if fm.fileExists(atPath: cli) && !fm.fileExists(atPath: rootPath() + "/config.json") { throw fail("The CLI destination already exists without a managed configuration.") }
 }
@@ -46,13 +48,13 @@ func installBundle(_ c: Configuration, _ p: Profile?, in stage: String) throws -
     try fm.copyItem(atPath: c.cliPath, toPath: path + "/Contents/MacOS/MultiClaude")
     var info: [String: Any] = ["CFBundleIdentifier": helperID + (p.map { ".profile" + $0.id } ?? ""), "CFBundleExecutable": "MultiClaude",
         "CFBundleName": p?.displayName ?? "Multi Claude Helper", "CFBundleDisplayName": p?.displayName ?? "Multi Claude Helper",
-        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.0.0", "CFBundleVersion": "1", "LSMinimumSystemVersion": "13.0",
-        "LSUIElement": true, "CFBundleIconFile": "ProfileIcon.icns", "MultiClaudeRoot": rootPath(),
+        "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "2", "LSMinimumSystemVersion": "13.0",
+        "LSUIElement": p == nil, "CFBundleIconFile": "ProfileIcon.icns", "MultiClaudeRoot": rootPath(),
         "NSAppleEventsUsageDescription": "Send a Claude sign-in link to the running profile you choose."]
     if let p { info["MultiClaudeProfileID"] = p.id }
     else { info["CFBundleURLTypes"] = c.schemes.map { ["CFBundleURLName": "Claude profile routing", "CFBundleURLSchemes": [$0]] } }
     try writePlist(info, path + "/Contents/Info.plist")
-    try renderProfileIcon(p?.iconColor ?? "orange", path + "/Contents/Resources/ProfileIcon.icns")
+    try renderProfileIcon(p?.iconColor ?? "orange", path + "/Contents/Resources/ProfileIcon.icns", tag: p.map(accountTag))
     guard try run("/usr/bin/codesign", ["--force", "--sign", "-", path]) == 0 else { throw fail("Could not sign the local launcher.") }
     return path
 }
@@ -64,6 +66,7 @@ func installLaunchers(_ c: Configuration, ids: Set<String>? = nil) throws {
     var staged = [String: String]()
     for p in selected { staged[p.id] = try installBundle(c, p, in: stage) }
     for p in selected {
+        stopLauncher(p)
         if fm.fileExists(atPath: p.launcherPath) {
             guard ownsBundle(p.launcherPath, profileID: p.id) else { throw fail("Refusing to replace an unrelated launcher.") }
             try fm.removeItem(atPath: p.launcherPath)
@@ -92,7 +95,7 @@ func installIntegration(_ c: inout Configuration) throws {
     if fm.fileExists(atPath: bundle) { guard ownsBundle(bundle) else { throw fail("Refusing to replace an unrelated helper.") }; try fm.removeItem(atPath: bundle) }
     try fm.moveItem(atPath: staged, toPath: bundle)
     guard try run(lsregister, ["-f", bundle]) == 0 else { throw fail("macOS could not register the helper.") }
-    for scheme in c.schemes { try setHandler(scheme, helperID) }
+    for scheme in c.schemes { try setHandler(scheme, c.usesLoginChooser ? helperID : claudeID) }
     try makeDirectory(NSHomeDirectory() + "/Library/LaunchAgents", mode: 0o755)
     let agent = agentPath()
     if fm.fileExists(atPath: agent), let existingRoot = plist(agent)?["MultiClaudeRoot"] as? String, existingRoot != rootPath() { throw fail("A helper is installed for a different Multi Claude root. Uninstall it before enabling this root.") }
@@ -124,14 +127,19 @@ func setup(_ args: [String]) throws {
     }
     c.schemes = try checkApp(c.appPath)
     c.integrationEnabled = !options.flags.contains("--no-integration")
+    if c.loginRoutingMode == nil { c.loginRoutingMode = "native" }
     while c.profiles.count < count { c.profiles.append(try newProfile(c)) }
     try preflight(c)
     // Check destinations before replacing launchers or registering protocols.
     if c.integrationEnabled, fm.fileExists(atPath: agentPath()), plist(agentPath())?["MultiClaudeRoot"] as? String != rootPath() { throw fail("Another Multi Claude installation owns the menu helper.") }
+    let reopen = c.profiles.filter { runningLauncher($0) != nil }.map(\.id)
+    let reopenManager = NSWorkspace.shared.runningApplications.contains { $0.bundleURL?.standardizedFileURL.path == c.applicationsDir + "/Multi Claude.app" }
     try installCLI(c); try save(c)
     for p in c.profiles { try makeProfileDirectories(p) }
-    try installLaunchers(c); try installIntegration(&c); try save(c)
+    try installLaunchers(c); try installManager(&c); try installIntegration(&c); try save(c)
     if c.integrationEnabled { try ensureCLIShortcut(c) }
+    for id in reopen { try launch(c, profile(c, id)) }
+    if reopenManager, let path = c.managerPath { _ = try run("/usr/bin/open", [path]) }
     print("Installed \(c.profiles.count) Claude profile launchers in \(c.applicationsDir).")
     print("Primary keeps your existing account. Open each extra profile and sign in separately.")
 }
@@ -171,17 +179,22 @@ func editProfile(_ id: String, name: String? = nil, color: String? = nil) throws
     guard let index = c.profiles.firstIndex(where: { $0.id == id }) else { return }
     if let name { c.profiles[index].name = name; c.profiles[index].launcherPath = c.applicationsDir + "/" + launcherName(name) + ".app" }
     if let color { c.profiles[index].iconColor = color }
-    try preflight(c); try installLaunchers(c, ids: [id]); try save(c)
+    try preflight(c)
+    let reopen = stopLauncher(old)
+    do { try installLaunchers(c, ids: [id]); try save(c) }
+    catch { if reopen { try? launch(try configuration(), old) }; throw error }
     if old.launcherPath != c.profiles[index].launcherPath, ownsBundle(old.launcherPath, profileID: id) {
         if c.integrationEnabled { _ = try? run(lsregister, ["-u", old.launcherPath]) }
         try fm.removeItem(atPath: old.launcherPath)
     }
+    if reopen { try launch(c, c.profiles[index]) }
     print("Updated \(id): \(c.profiles[index].displayName) (\(c.profiles[index].iconColor)).")
 }
 func removeProfile(_ id: String) throws {
     var c = try configuration(); let p = try profile(c, id)
     if fm.fileExists(atPath: p.launcherPath) { guard ownsBundle(p.launcherPath, profileID: id) else { throw fail("Refusing to remove an unrelated app.") } }
     c.profiles.removeAll { $0.id == id }; c.removedProfiles.append(p); try save(c)
+    stopLauncher(p)
     if ownsBundle(p.launcherPath, profileID: id) {
         if c.integrationEnabled { _ = try? run(lsregister, ["-u", p.launcherPath]) }
         try fm.removeItem(atPath: p.launcherPath)
@@ -222,9 +235,11 @@ func doctor() throws {
         if !runningHelper { problems.append("Menu helper is not running.") }
         for scheme in c.schemes {
             let owner = handler(scheme); print("\(scheme):// handler: \(owner)")
-            if owner != helperID { problems.append("\(scheme) login routing is not owned by Multi Claude.") }
+            if owner != (c.usesLoginChooser ? helperID : claudeID) { problems.append("\(scheme) login routing does not match the selected mode.") }
         }
+        print("Login mode: \(c.usesLoginChooser ? "Choose profile for browser callbacks" : "Claude native sign-in")")
     } else { print("Login routing and automatic startup are disabled (--no-integration).") }
+    if let managerPath = c.managerPath, !ownsManager(managerPath) { problems.append("The Multi Claude manager app is missing.") }
     if !problems.isEmpty { throw fail(problems.joined(separator: "\n") + "\nRun multi-claude-app setup to repair the integration.") }
     print("Profile folders, launchers, and enabled integration checks passed.")
 }
@@ -236,12 +251,23 @@ func uninstall() throws {
         if plist(agentPath())?["MultiClaudeRoot"] as? String == rootPath() { try fm.removeItem(atPath: agentPath()) }
     }
     for p in c.profiles + c.removedProfiles where ownsBundle(p.launcherPath, profileID: p.id) {
+        stopLauncher(p)
         _ = try? run(lsregister, ["-u", p.launcherPath]); try fm.removeItem(atPath: p.launcherPath)
     }
     let helper = rootPath() + "/Multi Claude Helper.app"
     if ownsBundle(helper) { _ = try? run(lsregister, ["-u", helper]); try fm.removeItem(atPath: helper) }
+    if let manager = c.managerPath, ownsManager(manager) {
+        for app in NSWorkspace.shared.runningApplications where app.bundleURL?.standardizedFileURL.path == manager { app.terminate() }
+        _ = try? run(lsregister, ["-u", manager]); try fm.removeItem(atPath: manager)
+    }
     c.integrationEnabled = false; try save(c)
     print("Removed launchers and login routing. All profile data and the CLI are preserved. Run setup to reinstall.")
+}
+func loginRouting(_ mode: String) throws {
+    guard ["native", "chooser"].contains(mode) else { throw fail("Use login-routing native or login-routing chooser.") }
+    var c = try configuration(); c.loginRoutingMode = mode; try save(c)
+    if c.integrationEnabled { for scheme in c.schemes { try setHandler(scheme, c.usesLoginChooser ? helperID : claudeID) } }
+    print(mode == "native" ? "Claude now handles its native sign-in. Retry sign-in from the intended account window." : "Browser callbacks now ask you to choose a running profile. Restart sign-in from the intended account window.")
 }
 func prompt(_ text: String, default fallback: String) -> String {
     print("\(text) [\(fallback)]: ", terminator: ""); fflush(stdout)
@@ -275,6 +301,8 @@ Multi Claude App — independent Claude desktop profiles on macOS
   icons                                         Show available colors
   remove ID / restore ID                        Preserve and restore profile data
   doctor                                        Check profiles and login routing
+  gui                                           Open the account manager
+  login-routing native|chooser                   Select native sign-in or callback chooser
   preview                                       Preview the login chooser
   uninstall                                     Remove integration, keep all data
 
@@ -284,7 +312,7 @@ Development setup: --no-integration --applications /absolute/path
 func cli(_ command: String, _ args: [String]) throws {
     switch command {
     case "help", "--help", "-h": print(help)
-    case "version", "--version": print("multi-claude-app 1.0.0")
+    case "version", "--version": print("multi-claude-app 1.1.0")
     case "setup": try setup(args)
     case "wizard": guard args.isEmpty else { throw fail("wizard takes no arguments.") }; try wizard()
     case "add": try add(args)
@@ -294,6 +322,9 @@ func cli(_ command: String, _ args: [String]) throws {
     case "remove", "restore": guard args.count == 1 else { throw fail("Use \(command) ID.") }; if command == "remove" { try removeProfile(args[0]) } else { try restoreProfile(args[0]) }
     case "launch": guard args.count == 1 else { throw fail("Use launch ID.") }; let c = try configuration(); try launch(c, profile(c, args[0]))
     case "doctor": guard args.isEmpty else { throw fail("doctor takes no arguments.") }; try doctor()
+    case "gui": guard args.isEmpty else { throw fail("gui takes no arguments.") }; startManager()
+    case "login-routing": guard args.count == 1 else { throw fail("Use login-routing native or login-routing chooser.") }; try loginRouting(args[0])
+    case "package-manager": guard args.count == 1, args[0].hasPrefix("/") else { throw fail("package-manager needs an absolute output path.") }; try packageManager(source: sourceExecutable(), destination: args[0], root: nil)
     case "uninstall": guard args.isEmpty else { throw fail("uninstall takes no arguments.") }; try uninstall()
     case "preview":
         guard args.isEmpty else { throw fail("preview takes no arguments.") }

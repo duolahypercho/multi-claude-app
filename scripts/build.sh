@@ -9,7 +9,12 @@ xcrun swiftc -O -target "$task_arch-apple-macosx13.0" \
   "$task_root/native/macos/Icons.swift" \
   "$task_root/native/macos/CLI.swift" \
   "$task_root/native/macos/Helper.swift" \
+  "$task_root/native/macos/Manager.swift" \
+  "$task_root/native/macos/Launcher.swift" \
   "$task_root/native/macos/main.swift" \
   -o "$task_root/build/multi-claude-app"
 codesign --force --sign - "$task_root/build/multi-claude-app"
+if [ "$task_arch" = "$(uname -m)" ]; then
+  "$task_root/build/multi-claude-app" package-manager "$task_root/build/Multi Claude.app"
+fi
 echo "Built $task_root/build/multi-claude-app"

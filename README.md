@@ -1,100 +1,112 @@
 # Multi Claude App
 
-Run several accounts in the **official Claude desktop app** at the same time on macOS. Each extra profile has separate browser storage, sign-in, desktop settings, and a colored launcher. Primary continues using your existing Claude data.
+A native macOS account manager for the official Claude desktop app. Open multiple profiles, sign in separately, and recognize each one by its account name or email and a **Claude icon with a small colored tag on the right**.
 
-Inspired by [am-will/multi-codex-app](https://github.com/am-will/multi-codex-app). The native profile chooser is adapted from that project's MIT-licensed helper. This version is a small Swift program with no third-party runtime dependencies.
+Primary uses your existing Claude profile. Extra accounts get fresh desktop storage. The original signed Claude app remains unchanged.
 
-## Start using an installed copy
+Inspired by [am-will/multi-codex-app](https://github.com/am-will/multi-codex-app). Built in Swift/AppKit, with no third-party runtime dependencies.
 
-1. Open Finder and choose **Go → Home → Applications**. This is your personal Applications folder.
-2. Double-click **Claude Primary** for your existing account.
-3. Double-click **Claude Secondary** and sign in to another account. Both can stay open.
-4. Use the **stack icon in the menu bar** to open either profile later.
+## Use the application
 
-If a profile chooser appears during browser sign-in, select the profile where you started the sign-in and click **Continue**. The chooser's **Preview** mode sends no login link and doesn't open an account; launch accounts using their app icons or the menu-bar entries.
+1. Open **Multi Claude.app** in your personal Applications folder: Finder → Go → Home → Applications.
+2. Click **Open Claude** on Primary or Secondary. Sign in separately in the intended Claude window.
+3. Click **Add Account** for more profiles. Enter an account name or email and choose a tag color.
+4. On an account card, use **Manage → Rename / Set Email Label** or **Icon Color** to change its identity.
 
-You can also double-click **Start Claude Profiles.command** in this project folder to open Primary and Secondary together. On the first run it builds and installs them if needed, so Apple's Swift command-line tools are required for that first build.
+Each running account keeps a separate colored launcher in the Dock. Its short tag combines the first character of your label with its profile number, such as **P1**, **S2**, or **W3**. Hover over the Dock icon to see the full account label. Click it to bring that profile's Claude windows forward. Drag the launcher into the Dock to keep it there when closed.
 
-## Install
+Labels are yours to set; they do not read or change the authenticated email. Claude windows still belong to the original Claude application, so macOS may also show its standard Dock icon. The colored icons are persistent account launchers. Quitting a launcher leaves its Claude process running; quitting Claude makes its launcher exit.
 
-Requires macOS 13 or newer and the official `/Applications/Claude.app`. Building the source requires Apple's Swift command-line tools. A built binary runs without Swift, Go, Node, or Python installed.
+The stack icon in the menu bar also opens profiles and the manager. Double-click **Start Claude Profiles.command** in the project folder to build/install on first use and open the manager.
+
+## Install from source
+
+Requires macOS 13+, the official `/Applications/Claude.app`, and Apple's Swift command-line tools to build. Built apps run without Swift, Go, Node, or Python installed.
 
 ```sh
 sh scripts/build.sh
 sh install.sh --count 2
+open "$HOME/Applications/Multi Claude.app"
 ```
 
-Open **Claude Primary** and **Claude Secondary** from `~/Applications`, Spotlight, or the stack icon in the menu bar. Sign in to the second account in Secondary. No existing credentials are copied. You can drag the launchers into the Dock yourself.
+The build also creates `build/Multi Claude.app`. It has a native first-run setup screen. It is locally ad-hoc signed; distributed downloads would need Apple signing and notarization for a normal Gatekeeper experience.
 
-The CLI is installed at `~/.local/bin/multi-claude-app`. If that directory isn't on your PATH, use the full path:
+## Sign-in troubleshooting
 
-```sh
-~/.local/bin/multi-claude-app wizard
-~/.local/bin/multi-claude-app list
-~/.local/bin/multi-claude-app launch 2
-```
+The default mode is **Claude Native Sign-in**. Claude keeps ownership of its authentication links. This avoids changing its native authentication behavior merely because a profile router is installed.
 
-## Manage profiles
+If sign-in stalls, choose **Manage → Retry Native Sign-in** on the intended account. This restores Claude's native link handlers and opens that profile. Cancel the old sign-in attempt, then retry using Claude's sign-in button. Choose the intended account in the browser or authentication sheet.
 
-```sh
-multi-claude-app add --name Work --color teal
-multi-claude-app add --count 2
-multi-claude-app rename 2 Personal
-multi-claude-app icon 2 purple
-multi-claude-app icons
-multi-claude-app remove 2
-multi-claude-app list --removed
-multi-claude-app restore 2
-multi-claude-app doctor
-```
+If a browser callback opens Primary or another profile, choose **File → Login Links → Choose Profile for Browser Callbacks**, then restart sign-in. A chooser appears for incoming links: select the **running profile where you began sign-in**, then Continue. Nothing is preselected. Closed profiles are disabled. Cancel discards the link; restart sign-in to get a fresh one.
 
-Colors: orange, blue, purple, teal, yellow. Up to 100 active profiles. Names and colors can change without changing data folders. Profile numbers are never reused. `setup --count N` only adds profiles when necessary; it never reduces the active count or overwrites sign-ins. Remove/restore only changes launchers. A running Claude window stays open when its launcher is removed.
+Some native authentication sessions return directly to their originating window, without a chooser. The browser's account session is shared, so select the correct account there too. Switching modes does not clear profile data or sign anyone out. The mode applies to this macOS user's Claude links, not just one profile.
 
-For **ten accounts total**, run this once, then open each new launcher and sign in separately:
+Real second-account, enterprise, and connector OAuth completion still needs verification by the user. These controls address protocol ownership conflicts; they cannot resolve service-side account errors, expired login links, or network problems.
+
+## Ten accounts
+
+Use **Add Account** eight more times after the initial two profiles, or run:
 
 ```sh
 ~/.local/bin/multi-claude-app setup --count 10
 ```
 
-You can keep unused profiles closed. Each running Claude instance uses additional memory and CPU.
+Sign in to each account separately. Keep unused profiles closed to save memory and CPU. There are five tag colors; profile numbers keep tags distinct when colors repeat. Up to 100 active profiles are supported.
 
-## Login links
+## Optional CLI
 
-The menu helper registers for the `claude://` and Microsoft sign-in schemes declared by the installed app. When a browser sends a link, choose the **running profile where you started sign-in or Connect**, then Continue. Nothing is preselected. Closed profiles are disabled. Cancel discards the link; restart the sign-in flow to try again.
+The CLI is installed at `~/.local/bin/multi-claude-app`. Use its full path if `~/.local/bin` is not on your PATH.
 
-The helper delivers a link directly to the chosen process through a macOS open-URL Apple Event. Links remain in memory and are never written to logs, a file, or a subprocess command line. It refreshes link ownership every five seconds because Claude registers itself at startup. Browser login is shared: pick the intended account in your browser too. Some native authentication flows return directly to their originating window and don't show a chooser.
+```sh
+multi-claude-app list
+multi-claude-app launch 2
+multi-claude-app add --name 'work@example.com' --color teal
+multi-claude-app rename 2 Personal
+multi-claude-app icon 2 purple
+multi-claude-app remove 2
+multi-claude-app list --removed
+multi-claude-app restore 2
+multi-claude-app login-routing native
+multi-claude-app login-routing chooser
+multi-claude-app doctor
+```
 
-## What is isolated
+Colors: orange, blue, purple, teal, yellow. Names/colors can change without changing data folders. Numbers are never reused. `setup --count N` only grows the active count. Remove/restore changes launchers and preserves account data; an open Claude window stays open when its launcher is removed.
 
-| Profile | Desktop data | Claude Code config environment |
+## How it works
+
+| Profile | Desktop storage | Claude Code configuration environment |
 | --- | --- | --- |
 | Primary | Existing `~/Library/Application Support/Claude` | Existing default |
 | Extra profiles | `~/Library/Application Support/Multi Claude/profiles/ID/desktop` | `…/profiles/ID/claude-code` |
 
-The launcher passes `--user-data-dir` to the original signed app. Extra profiles also receive `CLAUDE_CONFIG_DIR` for child tools that honor it. Claude may choose its own internal Code/Cowork directories; isolation of every spawned tool, OS Keychain item, and native service has not been verified. Usage and billing remain attached to each account.
+A small persistent launcher starts the original signed Claude app with Chromium's `--user-data-dir` flag. Extra profiles also receive `CLAUDE_CONFIG_DIR` for child tools that honor it. No existing credentials are copied. Usage and billing stay attached to each account.
 
-**Claude-specific limits:**
+In chooser mode, a native menu helper owns the `claude://` and installed Microsoft authentication schemes. It sends incoming links directly to the selected Claude process through a macOS open-URL Apple Event. Links stay in memory and are never stored in logs, files, or process arguments. The helper refreshes ownership every five seconds in chooser mode. In native mode, it leaves link ownership with Claude.
 
-- Tested with Claude Desktop **2.31226.1** on Apple silicon. Current signed builds ignore `CLAUDE_USER_DATA_DIR`; this tool uses the Chromium profile flag instead.
-- This Claude build marks relocated data folders as ineligible for **local pairing**. That restriction is preserved. Other Code/Cowork features may have additional constraints; verify the features you need after signing in.
-- The official Claude app is never copied, patched, or re-signed. Running windows can group under the original Claude Dock icon. Launchers have distinct names and colors.
-- Claude chats and memories are managed by the account/service. This tool does **not** implement Codex-style local chat or memory sharing.
-- Successful second-account login and real connector/enterprise OAuth completion require the user's account and have not been automated. The router and process delivery are tested separately.
-- Only macOS is implemented. Intel compilation is supported by `ARCH=x86_64 sh scripts/build.sh`; Intel runtime behavior is unverified.
+Editable SVG icons and macOS `.icns` icons are generated inside each launcher’s `Contents/Resources` folder. The vector Claude mark is in [assets/claude-mark.svg](assets/claude-mark.svg).
 
-## Updates and uninstall
+### Compatibility limits
 
-Update Claude normally. Run `multi-claude-app doctor` afterward. Repair the integration with `multi-claude-app setup`. After editing this tool, rebuild and run `sh install.sh`; the new binary replaces the installed helper and launchers while preserving profile data.
+- Tested locally with Claude Desktop **2.31226.1**, Apple silicon. Signed builds ignore `CLAUDE_USER_DATA_DIR`; this tool uses the Chromium flag.
+- This Claude build marks relocated data folders as ineligible for **local pairing**. That protection is preserved.
+- Isolation of all Code/Cowork tools, OS Keychain items, native services, and spawned processes is unverified. Claude may choose its own internal directories for some features.
+- Claude chats and memories are managed by its service. This app does not provide Codex-style local chat or memory sharing.
+- Intel compilation is supported by `ARCH=x86_64 sh scripts/build.sh`; Intel runtime behavior is unverified. Only macOS is implemented.
+
+## Update and uninstall
+
+Update Claude normally. Use **File → Check Setup** afterward. Rebuild and run `sh install.sh` to update this manager; setup preserves account data and replaces its own apps.
 
 ```sh
 multi-claude-app uninstall
 ```
 
-This removes managed launchers and the menu helper, stops its LaunchAgent, and restores the prior login handlers if Multi Claude still owns them. All account data, configuration, and the CLI are retained. Run `setup` to reinstall.
+Uninstall removes the manager, launchers, menu helper, and LaunchAgent. It restores prior login handlers when the helper still owns them. Account data, configuration, and the CLI are retained. Run `setup` to reinstall.
 
-Configuration: `~/Library/Application Support/Multi Claude/config.json`. Extra-profile folders are private (mode 700) and config is mode 600. Do not place a real install under `/tmp` or move its root after setup. Use one integrated installation per macOS user.
+Configuration: `~/Library/Application Support/Multi Claude/config.json`. Profile folders are mode 700; config is mode 600. Use one integrated installation per macOS user and keep its root in a permanent location.
 
-For development without changing login handlers or login items:
+For development without changing protocol handlers or login items:
 
 ```sh
 build/multi-claude-app --root /absolute/dev/root setup --count 2 \
@@ -104,4 +116,4 @@ python3 tests/test_cli.py
 
 ## Credits and license
 
-MIT. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). The custom C/card icons are original artwork. Claude and Anthropic are trademarks of their owners; this is an independent project.
+Implementation: MIT. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). The Claude mark is Anthropic's artwork/trademark and is used to identify Claude account launchers; it is not relicensed as MIT. This is an independent project, not an Anthropic product.

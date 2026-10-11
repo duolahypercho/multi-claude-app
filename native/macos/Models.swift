@@ -28,8 +28,12 @@ struct Configuration: Codable {
     var schemes: [String]
     var previousHandlers: [String: String] = [:]
     var integrationEnabled = false
+    // Older installs have no mode. Prefer Claude's native authentication flow.
+    var loginRoutingMode: String?
+    var managerPath: String?
     var profiles: [Profile] = []
     var removedProfiles: [Profile] = []
+    var usesLoginChooser: Bool { loginRoutingMode == "chooser" }
 }
 func launcherName(_ name: String) -> String {
     let lower = name.lowercased()
@@ -74,6 +78,8 @@ func validateConfig(_ c: Configuration) throws {
           c.profiles.count <= 100, c.schemes.contains("claude"),
           c.schemes.allSatisfy({ $0 == "claude" || $0 == "msauth." + claudeID }) else { throw fail("Unsupported or damaged configuration. Keep config.json and restore a backup.") }
     try validateNames(c.profiles)
+    if let mode = c.loginRoutingMode, !["native", "chooser"].contains(mode) { throw fail("Invalid login routing mode.") }
+    if let managerPath = c.managerPath, managerPath != c.applicationsDir + "/Multi Claude.app" { throw fail("Invalid manager app path.") }
     var ids = Set<String>(), dirs = [String]()
     for p in c.profiles + c.removedProfiles {
         guard let id = Int(p.id), id > 0, id <= 1_000_000, String(id) == p.id, ids.insert(p.id).inserted,
@@ -173,7 +179,7 @@ func deliver(_ raw: String, to app: NSRunningApplication) throws {
     if quiet { p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice }
     try p.run(); p.waitUntilExit(); return p.terminationStatus
 }
-func launch(_ c: Configuration, _ p: Profile) throws {
+func launchOfficial(_ c: Configuration, _ p: Profile) throws {
     _ = try checkApp(c.appPath)
     if let app = runningInstances(c)[p.id] { app.activate(options: [.activateAllWindows]); return }
     try makeProfileDirectories(p)
@@ -184,7 +190,11 @@ func launch(_ c: Configuration, _ p: Profile) throws {
     if !p.userDataDir.isEmpty { args += ["--args", "--user-data-dir=" + p.userDataDir] }
     guard try run("/usr/bin/open", args, environment: env) == 0 else { throw fail("Could not open \(p.displayName).") }
     // Claude re-registers its schemes at startup. The menu helper reclaims them too.
-    if c.integrationEnabled { for scheme in c.schemes { try? setHandler(scheme, helperID) } }
+    if c.integrationEnabled && c.usesLoginChooser { for scheme in c.schemes { try? setHandler(scheme, helperID) } }
+}
+func launch(_ c: Configuration, _ p: Profile) throws {
+    guard ownsBundle(p.launcherPath, profileID: p.id) else { throw fail("This account launcher is missing. Run setup to repair it.") }
+    guard try run("/usr/bin/open", [p.launcherPath]) == 0 else { throw fail("Could not open \(p.displayName).") }
 }
 func showError(_ text: String) {
     let a = NSAlert(); a.messageText = "Multi Claude"; a.informativeText = text; a.addButton(withTitle: "OK")

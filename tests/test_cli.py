@@ -49,12 +49,57 @@ class ProfileTests(unittest.TestCase):
         c = self.config()
         self.assertEqual(c["profiles"][0]["userDataDir"], "")
         self.assertFalse(c["integrationEnabled"])
+        self.assertEqual(c["loginRoutingMode"], "native")
+        self.assertTrue(Path(c["managerPath"]).exists())
         marker = Path(c["profiles"][1]["userDataDir"]) / "existing-account"
         marker.write_text("preserve this account")
         self.invoke("setup", "--count", "1", "--no-integration")
         self.assertEqual(len(self.config()["profiles"]), 2)
         self.assertEqual(marker.read_text(), "preserve this account")
         self.assertEqual((self.root / "config.json").stat().st_mode & 0o777, 0o600)
+
+    def test_email_labels_and_vector_tagged_regular_launchers(self):
+        self.invoke("rename", "2", "work@example.com")
+        p = self.config()["profiles"][1]
+        bundle = Path(p["launcherPath"])
+        with (bundle / "Contents/Info.plist").open("rb") as stream:
+            info = plistlib.load(stream)
+        self.assertFalse(info["LSUIElement"])
+        self.assertEqual(info["CFBundleDisplayName"], "Claude work@example.com")
+        self.assertNotIn("CFBundleURLTypes", info)
+        svg = (bundle / "Contents/Resources/ProfileIcon.svg").read_text()
+        self.assertIn(">W2</text>", svg)
+        self.assertIn('fill="#D97757"', svg)
+
+    def test_login_modes_and_old_config_migrate_without_losing_data(self):
+        c = self.config()
+        p = c["profiles"][1]
+        marker = Path(p["userDataDir"]) / "session"
+        marker.write_text("keep")
+        c.pop("loginRoutingMode")
+        c.pop("managerPath")
+        (self.root / "config.json").write_text(json.dumps(c))
+        self.invoke("list")
+        self.invoke("setup", "--no-integration")
+        self.assertEqual(self.config()["loginRoutingMode"], "native")
+        self.invoke("login-routing", "chooser")
+        self.assertEqual(self.config()["loginRoutingMode"], "chooser")
+        self.invoke("login-routing", "native")
+        original = (self.root / "config.json").read_bytes()
+        self.invoke("login-routing", "invalid", ok=False)
+        self.assertEqual((self.root / "config.json").read_bytes(), original)
+        self.assertEqual(marker.read_text(), "keep")
+
+    def test_manager_collision_is_preserved(self):
+        manager = Path(self.config()["managerPath"])
+        with (manager / "Contents/Info.plist").open("wb") as stream:
+            plistlib.dump({"CFBundleIdentifier": "unrelated.manager"}, stream)
+        marker = manager / "unrelated.txt"
+        marker.write_text("leave alone")
+        original = (self.root / "config.json").read_bytes()
+        self.invoke("setup", "--no-integration", ok=False)
+        self.assertEqual(marker.read_text(), "leave alone")
+        self.assertEqual((self.root / "config.json").read_bytes(), original)
 
     def test_rename_color_keeps_data(self):
         before = self.config()["profiles"][1]
