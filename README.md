@@ -102,9 +102,9 @@ Editable SVG icons and macOS `.icns` icons are generated inside each native acco
 
 ## Update and uninstall
 
-Update **the official Claude app** normally. Quit the native account copies, then run `multi-claude-app setup` to refresh them from the updated official app. **Use the official app for updates, not the account copies’ in-app updater.** Copies set `DISABLE_AUTOUPDATER=1` and make their bundled Squirrel installer non-executable so an update cannot discard the profile bootstrap. Setup checks the source version/signature identity and bootstrap digest, and keeps current copies in place.
+Update **the official Claude app** normally. The menu helper automatically checks every minute and refreshes closed account copies. Running accounts keep working and refresh after you quit them with Command-Q; reopen them afterward to use the new version. You can also run `multi-claude-app sync` to refresh closed copies immediately. **Use the official app for updates, not the account copies’ in-app updater.** Copies set `DISABLE_AUTOUPDATER=1` and make their bundled Squirrel installer non-executable so an update cannot discard the profile bootstrap. Setup checks the source version/signature identity and bootstrap digest, and keeps current copies in place.
 
-Rebuild and run `sh install.sh` to update this manager. Setup preserves account data. Migrating from old launchers stops those wrapper processes without quitting the real Claude windows. Once native copies are running, updates require quitting the accounts that need rebuilding.
+Rebuild and run `sh install.sh --defer-running` to update this manager without closing active accounts. Their app copies refresh after they quit. Setup preserves account data. Migrating from old launchers stops those wrapper processes without quitting the real Claude windows. Once native copies are running, updates require quitting the accounts that need rebuilding.
 
 ```sh
 multi-claude-app uninstall

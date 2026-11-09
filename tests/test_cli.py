@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import subprocess
 import tempfile
+import time
 import unittest
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -125,6 +126,63 @@ class ProfileTests(unittest.TestCase):
         after = {str(p.relative_to(self.app)): hashlib.sha256(p.read_bytes()).hexdigest()
                  for p in self.app.rglob("*") if p.is_file()}
         self.assertEqual(original, after)
+
+    def test_sync_updates_all_copies_and_preserves_data(self):
+        c = self.config()
+        original_config = (self.root / "config.json").read_bytes()
+        marker = Path(c["profiles"][1]["userDataDir"]) / "session"
+        marker.write_text("keep signed in")
+        info_path = self.app / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        info["CFBundleShortVersionString"] = "2.0"
+        info["CFBundleVersion"] = "2"
+        info_path.write_bytes(plistlib.dumps(info))
+        self.invoke("sync")
+        for p in c["profiles"]:
+            bundle = Path(p["launcherPath"])
+            updated = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
+            self.assertEqual(updated["CFBundleShortVersionString"], "2.0")
+            self.assertTrue(updated["MultiClaudeNative"])
+            inode = bundle.stat().st_ino
+            self.invoke("sync")
+            self.assertEqual(bundle.stat().st_ino, inode)
+        self.assertEqual(marker.read_text(), "keep signed in")
+        self.assertEqual((self.root / "config.json").read_bytes(), original_config)
+
+    def test_sync_defers_running_account_then_updates_after_exit(self):
+        c = self.config()
+        account = Path(c["profiles"][1]["launcherPath"])
+        process = subprocess.Popen([str(account / "Contents/MacOS/MultiClaudeNative")],
+                                   env=dict(os.environ, MULTI_CLAUDE_TEST_HOLD="1"),
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(50):
+                if "running (PID" in self.invoke("list").stdout:
+                    break
+                time.sleep(0.1)
+            else:
+                self.fail("Fixture did not register as running")
+            info_path = self.app / "Contents/Info.plist"
+            info = plistlib.loads(info_path.read_bytes())
+            info["CFBundleShortVersionString"] = "2.0"
+            info_path.write_bytes(plistlib.dumps(info))
+            self.invoke("sync")
+            self.assertIsNone(process.poll())
+            self.assertEqual(plistlib.loads((account / "Contents/Info.plist").read_bytes())["CFBundleShortVersionString"], "1.0")
+            primary = Path(c["profiles"][0]["launcherPath"])
+            self.assertEqual(plistlib.loads((primary / "Contents/Info.plist").read_bytes())["CFBundleShortVersionString"], "2.0")
+        finally:
+            process.terminate()
+            process.wait(timeout=10)
+        self.invoke("sync")
+        self.assertEqual(plistlib.loads((account / "Contents/Info.plist").read_bytes())["CFBundleShortVersionString"], "2.0")
+
+    def test_sync_respects_management_lock(self):
+        import fcntl
+        with (self.root / "management.lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.invoke("sync", ok=False)
+            self.assertIn("Another profile-management command", result.stderr)
 
     def test_ten_accounts_have_distinct_native_app_ids_and_original_data(self):
         self.invoke("setup", "--count", "10", "--no-integration")

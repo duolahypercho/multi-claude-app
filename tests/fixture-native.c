@@ -14,5 +14,7 @@ int main(int argc, char **argv) {
     field(getenv("CLAUDE_CONFIG_DIR")); field(getenv("CLAUDE_USER_DATA_DIR"));
     field(getenv("CLAUDE_CDP_AUTH")); field(getenv("ELECTRON_RUN_AS_NODE"));
     field(getenv("DISABLE_AUTOUPDATER"));
+    fflush(stdout);
+    if (getenv("MULTI_CLAUDE_TEST_HOLD")) sleep(60);
     return 0;
 }

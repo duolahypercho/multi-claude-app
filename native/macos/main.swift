@@ -18,7 +18,7 @@ do {
         startManager()
     } else {
         let command = args.first ?? (Bundle.main.bundleIdentifier == helperID ? "helper" : "help")
-        if ["setup", "wizard", "add", "rename", "icon", "remove", "restore", "uninstall", "login-routing"].contains(command) { try lockManagement() }
+        if ["setup", "sync", "wizard", "add", "rename", "icon", "remove", "restore", "uninstall", "login-routing"].contains(command) { try lockManagement() }
         defer { if managementFD >= 0 { flock(managementFD, LOCK_UN); close(managementFD) } }
         try cli(command, Array(args.dropFirst()))
     }

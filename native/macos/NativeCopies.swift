@@ -35,12 +35,10 @@ func nativeAppIsCurrent(_ c: Configuration, _ p: Profile) -> Bool {
         && info["MultiClaudeRelease"] as? String == releaseVersion
 }
 func runningNativeApp(_ path: String) -> NSRunningApplication? {
-    guard let executable = nativeExecutable(path) else { return nil }
+    // Treat every live process registered to this bundle as active, including
+    // the bootstrap interval and processes whose command line cannot be read.
     return NSWorkspace.shared.runningApplications.first {
-        guard !$0.isTerminated, $0.bundleURL?.standardizedFileURL.path == path, let cmd = commandLine($0.processIdentifier) else { return false }
-        // Also protect the brief startup interval before the bootstrap execs.
-        let bootstrap = path + "/Contents/MacOS/" + nativeBootstrap
-        return cmd.hasPrefix(executable + " ") || cmd == bootstrap || cmd.hasPrefix(bootstrap + " ")
+        !$0.isTerminated && $0.bundleURL?.standardizedFileURL.path == path
     }
 }
 func requireNativeAppClosed(_ p: Profile) throws {

@@ -87,6 +87,8 @@ final class Helper: NSObject, NSApplicationDelegate {
     var progressPanel: NSPanel?
     var progressIndicator: NSProgressIndicator?
     var progressLabel: NSTextField?
+    var updateTimer: Timer?
+    var updateInProgress = false
     let previewMode: Bool
     init(preview: Bool) { previewMode = preview }
     func applicationWillFinishLaunching(_ note: Notification) {
@@ -98,8 +100,33 @@ final class Helper: NSObject, NSApplicationDelegate {
         status.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "Multi Claude profiles")
         rebuildMenu(); claim(); ready = true; processNext()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in self?.claim(); self?.rebuildMenu() }
+        syncAccountApps()
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.syncAccountApps() }
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(accountDidQuit(_:)), name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         if CommandLine.arguments.count == 1 { preview() }
     }
+    @objc func accountDidQuit(_ note: Notification) {
+        guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              let id = app.bundleIdentifier, id == claudeID || id.hasPrefix(helperID + ".profile") else { return }
+        syncAccountApps()
+    }
+    func syncAccountApps() {
+        guard !updateInProgress, !operationInProgress, let c = try? configuration() else { return }
+        updateInProgress = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let proc = Process(); proc.executableURL = URL(fileURLWithPath: c.cliPath)
+            proc.arguments = ["--root", rootPath(), "sync"]
+            proc.standardOutput = FileHandle.nullDevice
+            // launchd captures errors; transient source updates or lock contention retry next minute.
+            do { try proc.run(); proc.waitUntilExit() }
+            catch { NSLog("Multi Claude could not start account sync: %@", error.localizedDescription) }
+            DispatchQueue.main.async {
+                self?.updateInProgress = false
+                self?.rebuildMenu()
+            }
+        }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { preview(); return false }
     func claim() {
         guard let c = try? configuration(), c.integrationEnabled && c.usesLoginChooser else { return }
