@@ -61,11 +61,13 @@ func installBundle(_ c: Configuration, _ p: Profile?, in stage: String) throws -
     guard try run("/usr/bin/codesign", ["--force", "--sign", "-", path]) == 0 else { throw fail("Could not sign the local launcher.") }
     return path
 }
-func installLaunchers(_ c: Configuration, ids: Set<String>? = nil) throws {
+func installLaunchers(_ c: Configuration, ids: Set<String>? = nil, deferRunning: Bool = false) throws {
     try makeDirectory(c.applicationsDir, mode: 0o755)
     let stage = c.applicationsDir + "/.multi-claude-stage-" + UUID().uuidString
     try makeDirectory(stage); defer { try? fm.removeItem(atPath: stage) }
-    let selected = c.profiles.filter { (ids == nil || ids!.contains($0.id)) && !nativeAppIsCurrent(c, $0) }
+    let selected = c.profiles.filter { (ids == nil || ids!.contains($0.id)) && !nativeAppIsCurrent(c, $0)
+        && (!deferRunning || runningNativeApp($0.launcherPath) == nil) }
+    let stamp = sourceStamp(c)
     for p in selected { try requireNativeAppClosed(p) }
     if c.integrationEnabled && !selected.isEmpty {
         guard try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", c.appPath]) == 0 else {
@@ -74,15 +76,31 @@ func installLaunchers(_ c: Configuration, ids: Set<String>? = nil) throws {
     }
     var staged = [String: String]()
     for p in selected { staged[p.id] = try installNativeProfile(c, p, in: stage) }
+    guard sourceStamp(c) == stamp else { throw fail("Claude changed during the update. The next sync will retry.") }
     for p in selected {
+        // An account may have opened while its replacement was being signed.
+        if deferRunning && runningNativeApp(p.launcherPath) != nil { continue }
+        try requireNativeAppClosed(p)
         stopLauncher(p)
         if fm.fileExists(atPath: p.launcherPath) {
             guard ownsBundle(p.launcherPath, profileID: p.id) else { throw fail("Refusing to replace an unrelated launcher.") }
-            try fm.removeItem(atPath: p.launcherPath)
+            // Atomically exchange bundles so Finder never sees a missing app.
+            guard renamex_np(staged[p.id]!, p.launcherPath, UInt32(RENAME_SWAP)) == 0 else {
+                throw fail("Could not replace the account app. Its previous version is still installed.")
+            }
+        } else {
+            try fm.moveItem(atPath: staged[p.id]!, toPath: p.launcherPath)
         }
-        try fm.moveItem(atPath: staged[p.id]!, toPath: p.launcherPath)
         if c.integrationEnabled { _ = try run(lsregister, ["-f", p.launcherPath]) }
     }
+}
+// Called in a separate process so hashing, copying and signing never block the UI.
+// The CLI management lock serializes this with setup, rename and removal.
+func syncProfiles() throws {
+    let c = try configuration()
+    _ = try checkApp(c.appPath)
+    try preflight(c)
+    try installLaunchers(c, deferRunning: true)
 }
 func agentPath() -> String { NSHomeDirectory() + "/Library/LaunchAgents/" + helperID + ".plist" }
 func stopHelper() {
@@ -123,7 +141,7 @@ func ensureCLIShortcut(_ c: Configuration) throws {
     try fm.createSymbolicLink(atPath: path, withDestinationPath: c.cliPath)
 }
 func setup(_ args: [String]) throws {
-    let options = try Options(args, allowed: ["--app", "--count", "--applications"], flags: ["--no-integration"])
+    let options = try Options(args, allowed: ["--app", "--count", "--applications"], flags: ["--no-integration", "--defer-running"])
     guard options.rest.isEmpty else { throw fail("Unexpected setup argument.") }
     let count = try number(options.values["--count"] ?? "2", max: 100)
     let configExists = fm.fileExists(atPath: rootPath() + "/config.json")
@@ -139,7 +157,7 @@ func setup(_ args: [String]) throws {
     if c.loginRoutingMode == nil { c.loginRoutingMode = "native" }
     while c.profiles.count < count { c.profiles.append(try newProfile(c)) }
     try preflight(c)
-    if configExists {
+    if configExists && !options.flags.contains("--defer-running") {
         let newBootstrap = try fileDigest(sourceExecutable())
         let oldBootstrap = try? fileDigest(c.cliPath)
         for p in c.profiles where newBootstrap != oldBootstrap || !nativeAppIsCurrent(c, p) { try requireNativeAppClosed(p) }
@@ -150,7 +168,7 @@ func setup(_ args: [String]) throws {
     let reopenManager = NSWorkspace.shared.runningApplications.contains { $0.bundleURL?.standardizedFileURL.path == c.applicationsDir + "/Multi Claude.app" }
     try installCLI(c); try save(c)
     for p in c.profiles { try makeProfileDirectories(p) }
-    try installLaunchers(c); try installManager(&c); try installIntegration(&c); try save(c)
+    try installLaunchers(c, deferRunning: options.flags.contains("--defer-running")); try installManager(&c); try installIntegration(&c); try save(c)
     if c.integrationEnabled { try ensureCLIShortcut(c) }
     for id in reopen { try launch(c, profile(c, id)) }
     if reopenManager, let path = c.managerPath { _ = try run("/usr/bin/open", [path]) }
@@ -319,6 +337,7 @@ let help = """
 Multi Claude App — independent Claude desktop profiles on macOS
 
   setup [--count N] [--app /path/to/Claude.app]   Install or repair (default: 2)
+  sync                                          Refresh closed accounts from official Claude
   wizard                                        Guided profile management
   list [--removed] [--json]                      Show profiles and status
   launch ID                                     Open or focus one profile
@@ -341,6 +360,7 @@ func cli(_ command: String, _ args: [String]) throws {
     case "help", "--help", "-h": print(help)
     case "version", "--version": print("multi-claude-app " + releaseVersion)
     case "setup": try setup(args)
+    case "sync": guard args.isEmpty else { throw fail("sync takes no arguments.") }; try syncProfiles()
     case "wizard": guard args.isEmpty else { throw fail("wizard takes no arguments.") }; try wizard()
     case "add": try add(args)
     case "list": try list(args)
